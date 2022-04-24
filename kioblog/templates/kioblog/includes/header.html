@@ -1,0 +1,18 @@
+{% load i18n %}
+{% load static %}
+<header class="clearfix my2 max-width-5 mx-auto center">
+{#    <a href="/" target="blank"><img src="logo.png" alt="logo"></a>#}
+    <nav id="kioblogmenu" class="p2">
+        <a href="{% url 'kioblog-home' %}"
+           class="p2 {% if '/category/' not in request.get_full_path %}active{% endif %}">
+            {% trans 'Home' %}
+        </a>
+        {% for category in kioblog_categories %}
+            <a href="{% url 'kioblog-category' category.slug %}"
+               class="p2 {% if category.slug in request.get_full_path %}active{% endif %}">
+                {{ category.title }}
+            </a>
+        {% endfor %}
+    </nav>
+</header>
+<div class="separator"></div>

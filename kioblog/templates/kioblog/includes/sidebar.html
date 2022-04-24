@@ -1,0 +1,27 @@
+{% load i18n %}
+{% load static %}
+
+<h2 class="text-secondary sidebar-title center">Follow me</h2>
+<div>
+    <a class="h1 ml1 kiobloglink">
+        <i class="fa-brands fa-twitter-square"></i>
+    </a>
+    <a class="h1 ml1 kiobloglink">
+        <i class="fa-brands fa-facebook-square"></i>
+    </a>
+    <a class="h1 ml1 kiobloglink">
+        <i class="fa-brands fa-instagram-square"></i>
+    </a>
+    <a class="h1 ml1 kiobloglink">
+        <i class="fa-brands fa-youtube-square"></i>
+    </a>
+    <a class="h1 ml1 kiobloglink">
+        <i class="fa-brands fa-twitch"></i>
+    </a>
+</div>
+<h2 class="text-secondary sidebar-title center mt3">{% trans 'Recent Posts' %}</h2>
+<div class="center">
+    {% for post in recent_posts %}
+    <a href="{% url 'kioblog-post' post.slug %}" class="h4 kiobloglink">{{ post.title }}</a>
+    {% endfor %}
+</div>

@@ -1,0 +1,24 @@
+{% extends "kioblog/base.html" %}
+{% load i18n %}
+{% load static %}
+
+{% block content %}
+    <div id="content">
+        {% for post in posts %}
+        <section>
+            <h4 class="text-secondary mb0 regular">
+                {{ post.category.title }}
+            </h4>
+            <h2 class="mt1">
+                {{ post.title }}
+            </h2>
+            <article>
+                {{ post.first_paragraph|safe }}
+            </article>
+            <div class="fit mt3 mb2">
+                <a href="{% url 'kioblog-post' post.slug %}" class="btn-readmore">{% trans 'Read More' %}</a>
+            </div>
+        </section>
+        {% endfor %}
+    </div>
+{% endblock %}

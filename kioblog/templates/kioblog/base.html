@@ -1,0 +1,29 @@
+{% load i18n %}
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <META charset="UTF-8">
+    <title>{% block title %}{{ kioblog_settings.blog_title }}{% endblock %}</title>
+    <meta name="description"
+          content="{% block meta_description %}{{ kioblog_settings.meta_description }}{% endblock %}">
+    <meta name="title"
+          content="{% block meta_title %}{{ kioblog_settings.meta_title }}{% endblock %}">
+    <link href="https://unpkg.com/basscss@8.0.2/css/basscss.min.css" rel="stylesheet">
+    <link href="{% static 'kioblog/css/custom.css' %}" rel="stylesheet">
+    <script src="https://kit.fontawesome.com/c19d45ce0a.js" crossorigin="anonymous"></script>
+</head>
+<body>
+{% include 'kioblog/includes/header.html' %}
+<div class="clearfix my2 max-width-5 mx-auto px1">
+    <section class="col col-12 sm-col-9 px2">
+        {% block content %}
+        {% endblock %}
+    </section>
+    <aside class="col col-12 sm-col-3 px2">
+        {% include 'kioblog/includes/sidebar.html' %}
+    </aside>
+</div>
+{% include 'kioblog/includes/footer.html' %}
+</body>
+</html>

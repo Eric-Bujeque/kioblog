@@ -1,0 +1,57 @@
+body {
+    font-family: 'Roboto', 'Catamaran', 'Helvetica', 'Arial', 'sans-serif';
+}
+article{
+    line-height: 2;
+}
+.text-secondary{
+    color: #db0000;
+}
+.max-width-5{
+    /*max-width:71.25rem*/
+    max-width: 1140px;
+}
+.separator{
+    border-bottom: 1px solid #c7c7c7;
+}
+#kioblogmenu{
+    font-weight: bold;
+    font-size: 1.5em;
+}
+#kioblogmenu a{
+    color: #282828;
+    text-decoration: none;
+}
+#kioblogmenu a:hover {
+    color: #db0000;
+}
+#kioblogmenu .active {
+    color: #db0000;
+}
+.kiobloglink {
+    color: #282828;
+    text-decoration: none;
+}
+.kiobloglink:hover {
+    color: #db0000;
+}
+.sidebar-title{
+    border-bottom: 1px solid #c7c7c7;
+}
+.btn-readmore{
+    text-decoration: none;
+    border: 1px solid #db0000;
+    border-radius: 20px;
+    padding: 7px 15px;
+    color: #282828;
+}
+.btn-readmore:hover{
+    font-weight: bold;
+    background-color: #db0000;
+    color: #ffffff;
+}
+/*@media (min-width: 40em) {*/
+/*    aside {*/
+/*        padding-left: 200px;*/
+/*    }*/
+/*}*/

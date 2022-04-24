@@ -1,0 +1,23 @@
+{% extends "kioblog/base.html" %}
+{% load i18n %}
+{% load static %}
+
+{% block title %}{{ post.title }}{% endblock %}
+{% block meta_title %}{{ post.meta_title }}{% endblock %}
+{% block meta_description %}{{ post.meta_description }}{% endblock %}
+
+{% block content %}
+    <div id="content">
+        <section>
+            <h4 class="text-secondary mb0 regular">
+                {{ post.category.title }}
+            </h4>
+            <h2 class="mt1">
+                {{ post.title }}
+            </h2>
+            <article>
+                {{ post.content|safe }}
+            </article>
+        </section>
+    </div>
+{% endblock %}
