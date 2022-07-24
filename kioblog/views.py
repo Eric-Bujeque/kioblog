@@ -1,7 +1,9 @@
 from django.views import generic
 from django.core.paginator import Paginator
+from django.utils.decorators import method_decorator
 
 from kioblog import models
+from kioblog import decorators
 
 
 class HomeView(generic.TemplateView):
@@ -22,6 +24,7 @@ class HomeView(generic.TemplateView):
         return data
 
 
+@method_decorator(decorators.load_recent_posts, name='dispatch')
 class PostView(generic.DetailView):
     template_name = 'kioblog/post.html'
     model = models.Post

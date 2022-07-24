@@ -43,8 +43,11 @@ class Post(models.Model):
         return paragraphs.groups()[0]
 
     @staticmethod
-    def get_recent_posts():
-        return Post.objects.all().order_by('-id')[:5]
+    def get_recent_posts(current_slug=None):
+        recent_posts = Post.objects.all().order_by('-id')
+        if current_slug is not None:
+            recent_posts = recent_posts.exclude(slug=current_slug)
+        return recent_posts[:5]
 
 
 class Comment(models.Model):
