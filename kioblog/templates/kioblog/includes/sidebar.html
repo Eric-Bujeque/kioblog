@@ -22,6 +22,6 @@
 <h2 class="text-secondary sidebar-title center mt3">{% trans 'Recent Posts' %}</h2>
 <div class="center">
     {% for post in recent_posts %}
-    <a href="{% url 'kioblog-post' post.slug %}" class="h4 kiobloglink">{{ post.title }}</a>
+    <p><a href="{% url 'kioblog-post' post.slug %}" class="h4 kiobloglink">{{ post.title }}</a></p>
     {% endfor %}
 </div>
