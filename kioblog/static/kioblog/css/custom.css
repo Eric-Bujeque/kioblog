@@ -4,6 +4,13 @@ body {
 article{
     line-height: 2;
 }
+.kioblog-post img{
+    width: 100%;
+}
+.kioblog-post a{
+    text-decoration: none;
+    color: #282828;
+}
 .text-secondary{
     color: #db0000;
 }

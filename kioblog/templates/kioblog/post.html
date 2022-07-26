@@ -8,13 +8,14 @@
 
 {% block content %}
     <div id="content">
-        <section>
+        <section class="kioblog-post">
             <h4 class="text-secondary mb0 regular">
                 {{ post.category.title }}
             </h4>
             <h2 class="mt1">
                 {{ post.title }}
             </h2>
+            <img src="{{ post.image.url }}" alt="{{ post.title }}">
             <article>
                 {{ post.content|safe }}
             </article>
