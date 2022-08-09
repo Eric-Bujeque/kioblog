@@ -130,4 +130,4 @@ UPLOAD_TO = 'kioblog'
 SITE_ID = 1
 ROBOTS_USE_HOST = False
 ROBOTS_USE_SCHEME_IN_HOST = True
-# ROBOTS_SITEMAP_URLS = ['https://defibradecarbono.es/sitemap.xml']
+ROBOTS_SITEMAP_URLS = ['https://kioblogproject.com/sitemap.xml']
