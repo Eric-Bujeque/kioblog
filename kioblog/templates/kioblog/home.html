@@ -32,4 +32,26 @@
         </section>
         {% endfor %}
     </div>
+
+    {% if posts.has_other_pages %}
+        <div id="kioblogpaginator" class="center mb2">
+            {% if posts.has_previous %}
+                <a class="kioblogpaginator" href="{% url 'kioblog-page' posts.previous_page_number %}">&laquo;</a>
+            {% else %}
+                <span class="disabled">&laquo;</span>
+            {% endif %}
+            {% for i in page_range %}
+                {% if posts.number == i %}
+                    <span class="current paginator">{{ i }}</span>
+                {% else %}
+                    <a class="kioblogpaginator" href="{% url 'kioblog-page' i %}">{{ i }}</a>
+                {% endif %}
+            {% endfor %}
+            {% if posts.has_next %}
+                <a class="kioblogpaginator" href="{% url 'kioblog-page' posts.next_page_number %}">&raquo;</a>
+            {% else %}
+                <span class="disabled paginator">&raquo;</span>
+            {% endif %}
+        </div>
+    {% endif %}
 {% endblock %}

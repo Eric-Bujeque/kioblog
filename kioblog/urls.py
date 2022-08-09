@@ -14,6 +14,7 @@ from kioblog import views
 urlpatterns = [
     # APP
     path('', views.HomeView.as_view(), name='kioblog-home'),
+    path('page/<int:page>', views.HomeView.as_view(), name='kioblog-page'),
     path('category/<str:category>', views.HomeView.as_view(), name='kioblog-category'),
     path('<slug:slug>/', views.PostView.as_view(), name='kioblog-post'),
 

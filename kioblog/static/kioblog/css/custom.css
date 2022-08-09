@@ -42,6 +42,17 @@ article{
 .kiobloglink:hover {
     color: #db0000;
 }
+.kioblogpaginator {
+    color: #282828;
+    text-decoration: none;
+}
+.kioblogpaginator:hover {
+    color: #db0000;
+}
+.current{
+    font-weight: bolder;
+    color: #db0000;
+}
 .sidebar-title{
     border-bottom: 1px solid #c7c7c7;
 }
