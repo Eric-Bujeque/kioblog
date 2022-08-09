@@ -3,21 +3,31 @@
 
 <h2 class="text-secondary sidebar-title center">Follow me</h2>
 <div>
-    <a class="h1 ml1 kiobloglink">
+    {% if kioblog_settings.social_twitter and kioblog_settings.social_twitter != '' %}
+    <a class="h1 ml1 kiobloglink" href="{{ kioblog_settings.social_twitter }}">
         <i class="fa-brands fa-twitter-square"></i>
     </a>
-    <a class="h1 ml1 kiobloglink">
+    {% endif %}
+    {% if kioblog_settings.social_facebook and kioblog_settings.social_facebook != '' %}
+    <a class="h1 ml1 kiobloglink" href="{{ kioblog_settings.social_facebook }}">
         <i class="fa-brands fa-facebook-square"></i>
     </a>
-    <a class="h1 ml1 kiobloglink">
+    {% endif %}
+    {% if kioblog_settings.social_instagram and kioblog_settings.social_instagram != '' %}
+    <a class="h1 ml1 kiobloglink" href="{{ kioblog_settings.social_instagram }}">
         <i class="fa-brands fa-instagram-square"></i>
     </a>
-    <a class="h1 ml1 kiobloglink">
+    {% endif %}
+    {% if kioblog_settings.social_youtube and kioblog_settings.social_youtube != '' %}
+    <a class="h1 ml1 kiobloglink" href="{{ kioblog_settings.social_youtube }}">
         <i class="fa-brands fa-youtube-square"></i>
     </a>
-    <a class="h1 ml1 kiobloglink">
+    {% endif %}
+    {% if kioblog_settings.social_twitch and kioblog_settings.social_twitch != '' %}
+    <a class="h1 ml1 kiobloglink" href="{{ kioblog_settings.social_twitch }}">
         <i class="fa-brands fa-twitch"></i>
     </a>
+    {% endif %}
 </div>
 <h2 class="text-secondary sidebar-title center mt3">{% trans 'Recent Posts' %}</h2>
 <div class="center">
