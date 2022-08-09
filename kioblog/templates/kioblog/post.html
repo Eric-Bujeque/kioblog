@@ -12,10 +12,15 @@
             <h4 class="text-secondary mb0 regular">
                 {{ post.category.title }}
             </h4>
-            <h2 class="mt1">
+            <h2 class="mt1 mb0">
                 {{ post.title }}
             </h2>
+            <div class="mb1">
+                <small>{{ post.user.get_full_name }} {{ post.created|date:'Y/m/d' }}</small>
+            </div>
+            {% if post.image %}
             <img src="{{ post.image.url }}" alt="{{ post.title }}">
+            {% endif %}
             <article>
                 {{ post.content|safe }}
             </article>
