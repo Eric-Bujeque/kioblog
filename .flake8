@@ -1,0 +1,14 @@
+[flake8]
+ignore = D203, E501
+exclude =
+    .git,
+    __pycache__,
+    manage.py,
+    build,
+    dist,
+    venv,
+    .git,
+    .idea,
+    .cache,
+    .circleci,
+    .coverage,

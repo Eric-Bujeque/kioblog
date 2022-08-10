@@ -1,6 +1,5 @@
 import secrets
 
-from django.test import TestCase
 from django.urls import reverse
 
 from kioblog import models

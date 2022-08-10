@@ -1,5 +1,3 @@
-from django.test import TestCase
-
 from kioblog.tests import base
 from kioblog import models
 
