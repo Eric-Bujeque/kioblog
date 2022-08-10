@@ -4,7 +4,7 @@ from setuptools import find_packages
 setup(
     name='kioblog',
     # packages=['kioblog'],
-    packages=find_packages(exclude=('frontendsample', 'kioblogdev', 'media')),
+    packages=find_packages(exclude=('kioblogdev', 'media')),
     version='0.1',
     license='MIT',
     description='Simple blog for Django',

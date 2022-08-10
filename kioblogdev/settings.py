@@ -30,7 +30,6 @@ INSTALLED_APPS = [
     'django.contrib.sitemaps',
     'robots',
     'kioblog',
-    'frontendsample',
     'django_summernote',
 ]
 
