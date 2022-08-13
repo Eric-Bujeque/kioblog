@@ -5,7 +5,7 @@ setup(
     name='kioblog',
     # packages=['kioblog'],
     packages=find_packages(exclude=('kioblogdev', 'media')),
-    version='0.1',
+    version='v0.1-alpha',
     license='MIT',
     description='Simple blog for Django',
     author='Eric Bujeque',
