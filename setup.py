@@ -3,15 +3,14 @@ from setuptools import find_packages
 
 setup(
     name='kioblog',
-    # packages=['kioblog'],
     packages=find_packages(exclude=('kioblogdev', 'media')),
-    version='v0.1.1-alpha',
+    version='v0.1.2-alpha',
     license='MIT',
     description='Simple blog for Django',
     author='Eric Bujeque',
     author_email='noikzyr3@gmail.com',
     url='https://github.com/Eric-Bujeque/kioblog',
-    download_url='https://github.com/Eric-Bujeque/kioblog/archive/refs/tags/v0.1-alpha.tar.gz',
+    download_url='https://github.com/Eric-Bujeque/kioblog/archive/refs/tags/v0.1.1-alpha.tar.gz',
     keywords=['blog', 'django'],
     install_requires=[
         'Django>=3.0',
