@@ -22,7 +22,7 @@ class PostSitemap(Sitemap):
     protocol = 'https'
 
     def items(self):
-        return models.Post.objects.all()
+        return models.Post.objects.filter(blocked=False, draft=False)
 
     def location(self, obj):
         return reverse('kioblog-post', kwargs={'slug': obj.slug})

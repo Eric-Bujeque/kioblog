@@ -13,9 +13,9 @@ class HomeView(generic.TemplateView):
         category = kwargs.get('category', False)
         page = kwargs.get('page', 1)
         if category:
-            posts = models.Post.objects.filter(category__slug=category, draft=False)
+            posts = models.Post.objects.filter(category__slug=category, draft=False, blocked=False)
         else:
-            posts = models.Post.objects.filter(draft=False)
+            posts = models.Post.objects.filter(draft=False, blocked=False)
         paginator = Paginator(posts, 5)
         data = {'posts': paginator.get_page(page),
                 'page_range': range(1, paginator.num_pages + 1),
@@ -27,4 +27,4 @@ class HomeView(generic.TemplateView):
 @method_decorator(decorators.load_recent_posts, name='dispatch')
 class PostView(generic.DetailView):
     template_name = 'kioblog/post.html'
-    model = models.Post
+    queryset = models.Post.objects.filter(blocked=False)

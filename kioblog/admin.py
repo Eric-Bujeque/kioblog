@@ -19,11 +19,11 @@ class CommentAdmin(admin.ModelAdmin):
     summernote_fields = ('content',)
 
 
-class MetaAdmin(admin.ModelAdmin):
+class SiteMetaAdmin(admin.ModelAdmin):
     list_display = ('key', 'value')
 
 
 admin.site.register(models.Post, PostAdmin)
 admin.site.register(models.Category, CategoryAdmin)
 admin.site.register(models.Comment, CommentAdmin)
-admin.site.register(models.Meta, MetaAdmin)
+admin.site.register(models.SiteMeta, SiteMetaAdmin)

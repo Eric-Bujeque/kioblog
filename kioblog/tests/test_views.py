@@ -45,3 +45,41 @@ class KioblogViews(base.BaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context_data['post'], self.post)
         self.assertIn(self.post.content, response.content.decode())
+
+    def test_blocked_post_hidden_from_home(self) -> None:
+        blocked = models.Post.objects.create(
+            title='blocked post',
+            content='hidden content',
+            user=self.user,
+            category=self.category,
+            slug='blocked-post',
+            blocked=True,
+        )
+        response = self.client.get(reverse('kioblog-home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(blocked, response.context_data['posts'].paginator.object_list)
+
+    def test_blocked_post_returns_404(self) -> None:
+        blocked = models.Post.objects.create(
+            title='blocked post',
+            content='hidden content',
+            user=self.user,
+            category=self.category,
+            slug='blocked-post',
+            blocked=True,
+        )
+        response = self.client.get(reverse('kioblog-post', kwargs={'slug': blocked.slug}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_draft_post_hidden_from_home(self) -> None:
+        draft = models.Post.objects.create(
+            title='draft post',
+            content='draft content',
+            user=self.user,
+            category=self.category,
+            slug='draft-post',
+            draft=True,
+        )
+        response = self.client.get(reverse('kioblog-home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(draft, response.context_data['posts'].paginator.object_list)

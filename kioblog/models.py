@@ -22,7 +22,7 @@ class Post(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     blocked = models.BooleanField(default=False)
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
-    created = models.DateField(auto_now_add=True)
+    created = models.DateTimeField(auto_now_add=True)
     slug = models.SlugField(max_length=200)
     image = models.FileField(upload_to=settings.UPLOAD_TO, null=True)
     draft = models.BooleanField(default=False)
@@ -44,7 +44,7 @@ class Post(models.Model):
 
     @staticmethod
     def get_recent_posts(current_slug=None):
-        recent_posts = Post.objects.all().order_by('-id')
+        recent_posts = Post.objects.filter(blocked=False, draft=False).order_by('-id')
         if current_slug is not None:
             recent_posts = recent_posts.exclude(slug=current_slug)
         return recent_posts[:5]
@@ -55,7 +55,7 @@ class Comment(models.Model):
     content = models.TextField()
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True)
     post = models.ForeignKey(Post, related_name='comments', on_delete=models.CASCADE)
-    created = models.DateField(auto_now_add=True)
+    created = models.DateTimeField(auto_now_add=True)
     email = models.EmailField()
     api = models.CharField(null=True, blank=True, max_length=50)
 
@@ -63,7 +63,7 @@ class Comment(models.Model):
         return '{} - {}'.format(self.username, self.post)
 
 
-class Meta(models.Model):
+class SiteMeta(models.Model):
     key = models.CharField(max_length=100)
     value = models.CharField(max_length=250, null=True)
 

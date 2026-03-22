@@ -1,12 +1,18 @@
-from distutils.core import setup
-from setuptools import find_packages
+from setuptools import setup, find_packages
 
 setup(
     name='kioblog',
-    packages=find_packages(exclude=('kioblogdev', 'media'), include="./kioblog/templates/*"),
-    package_data={'templates': ['kioblog/templates/*']},
+    packages=find_packages(exclude=['kioblogdev', 'kioblogdev.*', 'media']),
+    package_data={
+        'kioblog': [
+            'templates/kioblog/*.html',
+            'templates/kioblog/includes/*.html',
+            'static/kioblog/css/*.css',
+            'migrations/*.py',
+        ],
+    },
     include_package_data=True,
-    version='v0.1.4-alpha',
+    version='0.1.4a0',
     license='MIT',
     description='Simple blog for Django',
     author='Eric Bujeque',
@@ -14,13 +20,14 @@ setup(
     url='https://github.com/Eric-Bujeque/kioblog',
     download_url='https://github.com/Eric-Bujeque/kioblog/archive/refs/tags/v0.1.4-alpha.tar.gz',
     keywords=['blog', 'django'],
+    python_requires='>=3.8',
     install_requires=[
         'Django>=5.1',
         'django-robots>=6.1',
-        'django-summernote>=0.8.20.0'
+        'django-summernote>=0.8.20.0',
     ],
     classifiers=[
-        'Development Status :: 3 - Alpha',  # Chose either "3 - Alpha", "4 - Beta" or "5 - Production/Stable"
+        'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',
         'Topic :: Software Development :: Libraries :: Python Modules',
         'License :: OSI Approved :: MIT License',
