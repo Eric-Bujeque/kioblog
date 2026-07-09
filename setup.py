@@ -17,7 +17,9 @@ setup(
     install_requires=[
         'Django>=3.0',
         'django-robots>=4.0',
-        'django-summernote>=0.8.20.0'
+        'Markdown>=3.3',
+        'Pygments>=2.10',
+        'django-markdownx>=4.0'
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',  # Chose either "3 - Alpha", "4 - Beta" or "5 - Production/Stable"

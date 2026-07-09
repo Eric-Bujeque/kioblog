@@ -1,4 +1,6 @@
 # Django==4.0.4
 Django==3.2.12
 django-robots==5.0
-django-summernote==0.8.20.0
+Markdown==3.10.2
+Pygments==2.20.0
+django-markdownx==4.0.11
