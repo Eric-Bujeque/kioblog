@@ -131,8 +131,10 @@ MARKDOWNX_MARKDOWNIFY_FUNCTION = 'kioblog.markdown.render.render_markdown'
 
 # markdownx.urls is mounted inside kioblog.urls (under the blog's own prefix,
 # 'blog/' here), but the client-side JS always POSTs to the site-absolute
-# MARKDOWNX_URLS_PATH. Must match wherever the consumer mounts kioblog.urls.
+# MARKDOWNX_URLS_PATH and MARKDOWNX_UPLOAD_URLS_PATH. Both must match wherever
+# the consumer mounts kioblog.urls, or the preview/image-drop 404 silently.
 MARKDOWNX_URLS_PATH = '/blog/markdownx/markdownify/'
+MARKDOWNX_UPLOAD_URLS_PATH = '/blog/markdownx/upload/'
 
 # Sites
 SITE_ID = 1
