@@ -9,6 +9,7 @@ from kioblog import sitemap as blog_sitemap
 
 generated_sitemap = {'posts': blog_sitemap.PostSitemap,
                      'categories': blog_sitemap.CategorySitemap,
+                     'tags': blog_sitemap.TagSitemap,
                      'main': blog_sitemap.MainPageSitemap}
 
 urlpatterns = [
@@ -16,14 +17,16 @@ urlpatterns = [
     path('', views.HomeView.as_view(), name='kioblog-home'),
     path('page/<int:page>', views.HomeView.as_view(), name='kioblog-page'),
     path('category/<str:category>', views.HomeView.as_view(), name='kioblog-category'),
+    path('tag/<slug:tag>/', views.TagView.as_view(), name='kioblog-tag'),
+    path('search/', views.SearchView.as_view(), name='kioblog-search'),
     path('<slug:slug>/', views.PostView.as_view(), name='kioblog-post'),
 
     # SEO
     path('robots.txt', include('robots.urls')),
     path('sitemap.xml', sitemap, {'sitemaps': generated_sitemap}, name='django.contrib.sitemaps.views.sitemap'),
 
-    # SUMMERNOTE
-    path('summernote/', include('django_summernote.urls')),
+    # MARKDOWN EDITOR
+    path('markdownx/', include('markdownx.urls')),
 ]
 
 if settings.DEBUG:
