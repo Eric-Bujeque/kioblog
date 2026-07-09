@@ -35,6 +35,16 @@ class KioblogModels(base.BaseTestCase):
         self.assertEqual(self.post.get_previous(), older)
         self.assertEqual(self.post.get_next(), newer)
 
+    def test_display_excerpt_prefers_explicit_excerpt(self) -> None:
+        self.post.excerpt = 'A hand-written summary.'
+        self.post.content = '# Heading\n\nRendered paragraph text.'
+        self.assertEqual(self.post.display_excerpt, 'A hand-written summary.')
+
+    def test_display_excerpt_falls_back_to_rendered_content(self) -> None:
+        self.post.excerpt = ''
+        self.post.content = '# Heading\n\nRendered paragraph text.'
+        self.assertEqual(self.post.display_excerpt, 'Rendered paragraph text.')
+
     def test_get_previous_and_next_break_ties_on_same_published(self) -> None:
         same_time = timezone.now()
         p1 = models.Post.objects.create(

@@ -80,6 +80,15 @@ class Post(models.Model):
             return ''
         return paragraphs.groups()[0]
 
+    @property
+    def display_excerpt(self):
+        if self.excerpt:
+            return self.excerpt
+        match = re.search(r'<p[^>]*>(.*?)</p>', self.content_html, re.DOTALL)
+        if not match:
+            return ''
+        return re.sub(r'<[^>]+>', '', match.group(1)).strip()
+
     def get_previous(self):
         tie_break = models.Q(published__lt=self.published) | models.Q(published=self.published, id__lt=self.id)
         return Post.objects.filter(draft=False).filter(tie_break).order_by('-published', '-id').first()

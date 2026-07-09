@@ -24,7 +24,7 @@
             <img src="{{ post.image.url }}" alt="{{ post.title }}">
             {% endif %}
             <article>
-                {{ post.excerpt }}
+                {{ post.display_excerpt }}
             </article>
             {% if post.tags.all %}
             <div class="kioblog-tags mt1">

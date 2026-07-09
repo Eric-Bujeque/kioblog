@@ -24,7 +24,7 @@
             <div class="mb1">
                 <small>{{ post.user.get_full_name }} {{ post.published|date:'Y/m/d' }} &middot; {{ post.reading_time }} min read</small>
             </div>
-            <article>{{ post.excerpt }}</article>
+            <article>{{ post.display_excerpt }}</article>
         </section>
         {% empty %}
         {% if query %}<p>{% trans 'No results found.' %}</p>{% endif %}
