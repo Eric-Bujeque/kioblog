@@ -81,12 +81,12 @@ class Post(models.Model):
         return paragraphs.groups()[0]
 
     def get_previous(self):
-        return (Post.objects.filter(draft=False, published__lt=self.published)
-                .order_by('-published').first())
+        tie_break = models.Q(published__lt=self.published) | models.Q(published=self.published, id__lt=self.id)
+        return Post.objects.filter(draft=False).filter(tie_break).order_by('-published', '-id').first()
 
     def get_next(self):
-        return (Post.objects.filter(draft=False, published__gt=self.published)
-                .order_by('published').first())
+        tie_break = models.Q(published__gt=self.published) | models.Q(published=self.published, id__gt=self.id)
+        return Post.objects.filter(draft=False).filter(tie_break).order_by('published', 'id').first()
 
     def related_posts(self, limit=4):
         qs = (Post.objects.filter(draft=False)

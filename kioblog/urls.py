@@ -18,6 +18,7 @@ urlpatterns = [
     path('page/<int:page>', views.HomeView.as_view(), name='kioblog-page'),
     path('category/<str:category>', views.HomeView.as_view(), name='kioblog-category'),
     path('tag/<slug:tag>/', views.TagView.as_view(), name='kioblog-tag'),
+    path('tag/<slug:tag>/page/<int:page>/', views.TagView.as_view(), name='kioblog-tag-page'),
     path('search/', views.SearchView.as_view(), name='kioblog-search'),
     path('<slug:slug>/', views.PostView.as_view(), name='kioblog-post'),
 

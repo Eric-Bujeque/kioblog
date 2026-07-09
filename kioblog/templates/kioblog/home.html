@@ -45,19 +45,29 @@
     {% if posts.has_other_pages %}
         <div id="kioblogpaginator" class="center mb2">
             {% if posts.has_previous %}
-                <a class="kioblogpaginator" href="{% url 'kioblog-page' posts.previous_page_number %}">&laquo;</a>
+                {% if tag %}
+                    <a class="kioblogpaginator" href="{% url 'kioblog-tag-page' tag.slug posts.previous_page_number %}">&laquo;</a>
+                {% else %}
+                    <a class="kioblogpaginator" href="{% url 'kioblog-page' posts.previous_page_number %}">&laquo;</a>
+                {% endif %}
             {% else %}
                 <span class="disabled">&laquo;</span>
             {% endif %}
             {% for i in page_range %}
                 {% if posts.number == i %}
                     <span class="current paginator">{{ i }}</span>
+                {% elif tag %}
+                    <a class="kioblogpaginator" href="{% url 'kioblog-tag-page' tag.slug i %}">{{ i }}</a>
                 {% else %}
                     <a class="kioblogpaginator" href="{% url 'kioblog-page' i %}">{{ i }}</a>
                 {% endif %}
             {% endfor %}
             {% if posts.has_next %}
-                <a class="kioblogpaginator" href="{% url 'kioblog-page' posts.next_page_number %}">&raquo;</a>
+                {% if tag %}
+                    <a class="kioblogpaginator" href="{% url 'kioblog-tag-page' tag.slug posts.next_page_number %}">&raquo;</a>
+                {% else %}
+                    <a class="kioblogpaginator" href="{% url 'kioblog-page' posts.next_page_number %}">&raquo;</a>
+                {% endif %}
             {% else %}
                 <span class="disabled paginator">&raquo;</span>
             {% endif %}

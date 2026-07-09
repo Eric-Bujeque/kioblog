@@ -35,6 +35,21 @@ class KioblogModels(base.BaseTestCase):
         self.assertEqual(self.post.get_previous(), older)
         self.assertEqual(self.post.get_next(), newer)
 
+    def test_get_previous_and_next_break_ties_on_same_published(self) -> None:
+        same_time = timezone.now()
+        p1 = models.Post.objects.create(
+            title='tie-1', content='x', user=self.user, category=self.category,
+            slug='tie-1', published=same_time)
+        p2 = models.Post.objects.create(
+            title='tie-2', content='x', user=self.user, category=self.category,
+            slug='tie-2', published=same_time)
+        p3 = models.Post.objects.create(
+            title='tie-3', content='x', user=self.user, category=self.category,
+            slug='tie-3', published=same_time)
+        # Same published (e.g. midnight-backfilled posts); ordering falls back to id.
+        self.assertEqual(p2.get_previous(), p1)
+        self.assertEqual(p2.get_next(), p3)
+
     def test_related_posts_share_category_and_exclude_self(self) -> None:
         sibling = models.Post.objects.create(
             title='sibling', content='x', user=self.user, category=self.category,
