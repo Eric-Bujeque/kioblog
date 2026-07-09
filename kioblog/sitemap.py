@@ -22,10 +22,25 @@ class PostSitemap(Sitemap):
     protocol = 'https'
 
     def items(self):
-        return models.Post.objects.all()
+        return models.Post.objects.filter(draft=False)
+
+    def lastmod(self, obj):
+        return obj.published
 
     def location(self, obj):
         return reverse('kioblog-post', kwargs={'slug': obj.slug})
+
+
+class TagSitemap(Sitemap):
+    changefreq = "never"
+    priority = 0.4
+    protocol = 'https'
+
+    def items(self):
+        return models.Tag.objects.all()
+
+    def location(self, obj):
+        return reverse('kioblog-tag', kwargs={'tag': obj.slug})
 
 
 class MainPageSitemap(Sitemap):

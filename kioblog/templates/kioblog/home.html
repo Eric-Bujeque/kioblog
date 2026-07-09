@@ -4,6 +4,8 @@
 
 {% block content %}
     <div id="content">
+        {% if category %}<h1 class="mt0 mb3">{{ category.title }}</h1>{% endif %}
+        {% if tag %}<h1 class="mt0 mb3">#{{ tag.title }}</h1>{% endif %}
         {% for post in posts %}
         <section class="mb4 kioblog-post">
             <h4 class="text-secondary mb0 regular">
@@ -15,15 +17,22 @@
                 </a>
             </h2>
             <div class="mb1">
-                <small>{{ post.user.get_full_name }} {{ post.created|date:'Y/m/d' }}</small>
+                <small>{{ post.user.get_full_name }} {{ post.published|date:'Y/m/d' }} &middot; {{ post.reading_time }} min read</small>
             </div>
             {% if post.image %}
             <div class="clearfix"></div>
             <img src="{{ post.image.url }}" alt="{{ post.title }}">
             {% endif %}
             <article>
-                {{ post.first_paragraph|safe }}
+                {{ post.excerpt }}
             </article>
+            {% if post.tags.all %}
+            <div class="kioblog-tags mt1">
+                {% for tag in post.tags.all %}
+                <a href="{% url 'kioblog-tag' tag.slug %}" class="kioblog-tag">#{{ tag.title }}</a>
+                {% endfor %}
+            </div>
+            {% endif %}
             <div class="fit mt3 mb2">
                 <a href="{% url 'kioblog-post' post.slug %}" class="btn-readmore">
                     {% trans 'Read More' %}
