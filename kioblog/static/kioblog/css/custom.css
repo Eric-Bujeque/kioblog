@@ -1,5 +1,7 @@
 body {
     font-family: 'Roboto', 'Catamaran', 'Helvetica', 'Arial', 'sans-serif';
+    background: #ffffff;
+    color: #282828;
 }
 article{
     line-height: 2;
