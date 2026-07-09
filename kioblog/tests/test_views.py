@@ -9,7 +9,7 @@ from kioblog.tests import base
 class KioblogViews(base.BaseTestCase):
     def setUp(self) -> None:
         super(KioblogViews, self).setUp()
-        [models.Post.objects.create(
+        self.posts = [models.Post.objects.create(
             title=secrets.token_hex(nbytes=16),
             content=secrets.token_hex(nbytes=16),
             user=self.user,
@@ -45,3 +45,29 @@ class KioblogViews(base.BaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context_data['post'], self.post)
         self.assertIn(self.post.content, response.content.decode())
+
+    def test_post_context_has_neighbours_and_related(self) -> None:
+        response = self.client.get(reverse('kioblog-post', kwargs={'slug': self.post.slug}))
+        for key in ['prev_post', 'next_post', 'related_posts']:
+            self.assertIn(key, response.context_data)
+
+    def test_tag(self) -> None:
+        tag = models.Tag.objects.create(title='django', slug='django')
+        self.post.tags.add(tag)
+        response = self.client.get(reverse('kioblog-tag', kwargs={'tag': tag.slug}))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['tag'], tag)
+        self.assertIn(self.post, response.context_data['posts'].paginator.object_list)
+        self.assertNotIn(self.posts[0], response.context_data['posts'].paginator.object_list)
+
+    def test_search_matches_title(self) -> None:
+        response = self.client.get(reverse('kioblog-search'), {'q': 'test title'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['query'], 'test title')
+        self.assertIn(self.post, response.context_data['posts'])
+        self.assertEqual(response.context_data['count'], 1)
+
+    def test_search_empty_query_returns_nothing(self) -> None:
+        response = self.client.get(reverse('kioblog-search'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['count'], 0)

@@ -1,3 +1,5 @@
+from django.utils import timezone
+
 from kioblog.tests import base
 from kioblog import models
 
@@ -13,3 +15,37 @@ class KioblogModels(base.BaseTestCase):
 
     def test_post_get_recent_posts_current(self) -> None:
         self.assertNotIn(self.post, models.Post.get_recent_posts(self.post.slug))
+
+    def test_content_html_renders_markdown(self) -> None:
+        self.post.content = '# Heading\n\nBody text.'
+        self.assertIn('<h2 id="heading">Heading</h2>', self.post.content_html)
+        self.assertIn('<p>Body text.</p>', self.post.content_html)
+
+    def test_reading_time_at_least_one_minute(self) -> None:
+        self.assertGreaterEqual(self.post.reading_time, 1)
+
+    def test_get_previous_and_next_are_nearest_neighbours(self) -> None:
+        now = timezone.now()
+        older = models.Post.objects.create(
+            title='older', content='x', user=self.user, category=self.category,
+            slug='older', published=now - timezone.timedelta(days=2))
+        newer = models.Post.objects.create(
+            title='newer', content='x', user=self.user, category=self.category,
+            slug='newer', published=now + timezone.timedelta(days=2))
+        self.assertEqual(self.post.get_previous(), older)
+        self.assertEqual(self.post.get_next(), newer)
+
+    def test_related_posts_share_category_and_exclude_self(self) -> None:
+        sibling = models.Post.objects.create(
+            title='sibling', content='x', user=self.user, category=self.category,
+            slug='sibling')
+        related = self.post.related_posts()
+        self.assertIn(sibling, related)
+        self.assertNotIn(self.post, related)
+
+    def test_category_post_count_ignores_drafts(self) -> None:
+        models.Post.objects.create(
+            title='draft', content='x', user=self.user, category=self.category,
+            slug='draft', draft=True)
+        # self.post (non-draft) counts, the draft does not.
+        self.assertEqual(self.category.post_count(), 1)
