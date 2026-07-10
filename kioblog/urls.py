@@ -1,8 +1,11 @@
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.sitemaps.views import sitemap
 from django.urls import path
 from django.urls import include
 from django.conf import settings
 from django.conf.urls.static import static
+
+from markdownx.views import ImageUploadView, MarkdownifyView
 
 from kioblog import views
 from kioblog import sitemap as blog_sitemap
@@ -27,7 +30,12 @@ urlpatterns = [
     path('sitemap.xml', sitemap, {'sitemaps': generated_sitemap}, name='django.contrib.sitemaps.views.sitemap'),
 
     # MARKDOWN EDITOR
-    path('markdownx/', include('markdownx.urls')),
+    # markdownx ships these views with no auth check of their own (anyone could
+    # POST an image to ImageUploadView), so wrap them in staff_member_required
+    # instead of including markdownx.urls directly. Same paths/names as
+    # markdownx.urls so MARKDOWNX_URLS_PATH / MARKDOWNX_UPLOAD_URLS_PATH still line up.
+    path('markdownx/upload/', staff_member_required(ImageUploadView.as_view()), name='markdownx_upload'),
+    path('markdownx/markdownify/', staff_member_required(MarkdownifyView.as_view()), name='markdownx_markdownify'),
 ]
 
 if settings.DEBUG:

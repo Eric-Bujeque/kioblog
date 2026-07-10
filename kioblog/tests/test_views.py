@@ -1,5 +1,6 @@
 import secrets
 
+from django.contrib.auth.models import User
 from django.urls import reverse
 
 from kioblog import models
@@ -75,6 +76,19 @@ class KioblogViews(base.BaseTestCase):
         html = page1.content.decode()
         self.assertIn(reverse('kioblog-tag-page', kwargs={'tag': tag.slug, 'page': 2}), html)
         self.assertNotIn(reverse('kioblog-page', kwargs={'page': 2}), html)
+
+    def test_markdownx_endpoints_require_staff(self) -> None:
+        for name in ['markdownx_upload', 'markdownx_markdownify']:
+            response = self.client.post(reverse(name), {})
+            self.assertEqual(response.status_code, 302)
+            self.assertIn('/admin/login/', response.url)
+
+    def test_markdownx_markdownify_accessible_to_staff(self) -> None:
+        User.objects.create_user(username='staffuser', password='pass', is_staff=True)
+        self.client.login(username='staffuser', password='pass')
+        response = self.client.post(
+            reverse('markdownx_markdownify'), {'content': '# hi'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200)
 
     def test_search_matches_title(self) -> None:
         response = self.client.get(reverse('kioblog-search'), {'q': 'test title'})
