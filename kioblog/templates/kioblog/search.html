@@ -1,0 +1,33 @@
+{% extends "kioblog/base.html" %}
+{% load i18n %}
+{% load static %}
+
+{% block title %}{% trans 'Search' %}{% endblock %}
+
+{% block content %}
+    <div id="content">
+        <form action="{% url 'kioblog-search' %}" method="get" class="mb3">
+            <input type="search" name="q" value="{{ query }}" placeholder="{% trans 'Search' %}">
+            <button type="submit">{% trans 'Search' %}</button>
+        </form>
+
+        {% if query %}
+        <h1 class="mt0 mb3">{% blocktrans count counter=count %}{{ count }} result for "{{ query }}"{% plural %}{{ count }} results for "{{ query }}"{% endblocktrans %}</h1>
+        {% endif %}
+
+        {% for post in posts %}
+        <section class="mb4 kioblog-post">
+            <h4 class="text-secondary mb0 regular">{{ post.category.title }}</h4>
+            <h2 class="mt1 mb0">
+                <a href="{% url 'kioblog-post' post.slug %}">{{ post.title }}</a>
+            </h2>
+            <div class="mb1">
+                <small>{{ post.user.get_full_name }} {{ post.published|date:'Y/m/d' }} &middot; {{ post.reading_time }} min read</small>
+            </div>
+            <article>{{ post.display_excerpt }}</article>
+        </section>
+        {% empty %}
+        {% if query %}<p>{% trans 'No results found.' %}</p>{% endif %}
+        {% endfor %}
+    </div>
+{% endblock %}

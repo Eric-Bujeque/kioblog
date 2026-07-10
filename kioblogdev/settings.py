@@ -14,7 +14,7 @@ SECRET_KEY = 'django-insecure-*1feoju&d9ra4r1mn+r5ubc_h2jeswaey9f*w32btlkb_sgylv
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['0.0.0.0']
+ALLOWED_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -30,7 +30,7 @@ INSTALLED_APPS = [
     'django.contrib.sitemaps',
     'robots',
     'kioblog',
-    'django_summernote',
+    'markdownx',
 ]
 
 MIDDLEWARE = [
@@ -124,6 +124,17 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Blog custom
 UPLOAD_TO = 'kioblog'
+
+# Render the admin markdown preview through kioblog's own pipeline so it
+# matches the public page (code chrome + toc).
+MARKDOWNX_MARKDOWNIFY_FUNCTION = 'kioblog.markdown.render.render_markdown'
+
+# markdownx.urls is mounted inside kioblog.urls (under the blog's own prefix,
+# 'blog/' here), but the client-side JS always POSTs to the site-absolute
+# MARKDOWNX_URLS_PATH and MARKDOWNX_UPLOAD_URLS_PATH. Both must match wherever
+# the consumer mounts kioblog.urls, or the preview/image-drop 404 silently.
+MARKDOWNX_URLS_PATH = '/blog/markdownx/markdownify/'
+MARKDOWNX_UPLOAD_URLS_PATH = '/blog/markdownx/upload/'
 
 # Sites
 SITE_ID = 1

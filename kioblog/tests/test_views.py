@@ -1,5 +1,6 @@
 import secrets
 
+from django.contrib.auth.models import User
 from django.urls import reverse
 
 from kioblog import models
@@ -9,7 +10,7 @@ from kioblog.tests import base
 class KioblogViews(base.BaseTestCase):
     def setUp(self) -> None:
         super(KioblogViews, self).setUp()
-        [models.Post.objects.create(
+        self.posts = [models.Post.objects.create(
             title=secrets.token_hex(nbytes=16),
             content=secrets.token_hex(nbytes=16),
             user=self.user,
@@ -45,3 +46,58 @@ class KioblogViews(base.BaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context_data['post'], self.post)
         self.assertIn(self.post.content, response.content.decode())
+
+    def test_post_context_has_neighbours_and_related(self) -> None:
+        response = self.client.get(reverse('kioblog-post', kwargs={'slug': self.post.slug}))
+        for key in ['prev_post', 'next_post', 'related_posts']:
+            self.assertIn(key, response.context_data)
+
+    def test_tag(self) -> None:
+        tag = models.Tag.objects.create(title='django', slug='django')
+        self.post.tags.add(tag)
+        response = self.client.get(reverse('kioblog-tag', kwargs={'tag': tag.slug}))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['tag'], tag)
+        self.assertIn(self.post, response.context_data['posts'].paginator.object_list)
+        self.assertNotIn(self.posts[0], response.context_data['posts'].paginator.object_list)
+
+    def test_tag_pagination_preserves_filter(self) -> None:
+        tag = models.Tag.objects.create(title='django', slug='django')
+        self.post.tags.add(tag)
+        for post in self.posts:
+            post.tags.add(tag)
+        response = self.client.get(reverse('kioblog-tag-page', kwargs={'tag': tag.slug, 'page': 2}))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['tag'], tag)
+        self.assertEqual(response.context_data['posts'].paginator.count, 10)
+        self.assertEqual(len(response.context_data['posts'].object_list), 5)
+
+        page1 = self.client.get(reverse('kioblog-tag', kwargs={'tag': tag.slug}))
+        html = page1.content.decode()
+        self.assertIn(reverse('kioblog-tag-page', kwargs={'tag': tag.slug, 'page': 2}), html)
+        self.assertNotIn(reverse('kioblog-page', kwargs={'page': 2}), html)
+
+    def test_markdownx_endpoints_require_staff(self) -> None:
+        for name in ['markdownx_upload', 'markdownx_markdownify']:
+            response = self.client.post(reverse(name), {})
+            self.assertEqual(response.status_code, 302)
+            self.assertIn('/admin/login/', response.url)
+
+    def test_markdownx_markdownify_accessible_to_staff(self) -> None:
+        User.objects.create_user(username='staffuser', password='pass', is_staff=True)
+        self.client.login(username='staffuser', password='pass')
+        response = self.client.post(
+            reverse('markdownx_markdownify'), {'content': '# hi'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200)
+
+    def test_search_matches_title(self) -> None:
+        response = self.client.get(reverse('kioblog-search'), {'q': 'test title'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['query'], 'test title')
+        self.assertIn(self.post, response.context_data['posts'])
+        self.assertEqual(response.context_data['count'], 1)
+
+    def test_search_empty_query_returns_nothing(self) -> None:
+        response = self.client.get(reverse('kioblog-search'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['count'], 0)
