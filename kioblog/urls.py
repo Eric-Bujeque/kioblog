@@ -20,6 +20,7 @@ urlpatterns = [
     path('', views.HomeView.as_view(), name='kioblog-home'),
     path('page/<int:page>', views.HomeView.as_view(), name='kioblog-page'),
     path('category/<str:category>', views.HomeView.as_view(), name='kioblog-category'),
+    path('category/<str:category>/page/<int:page>/', views.HomeView.as_view(), name='kioblog-category-page'),
     path('tag/<slug:tag>/', views.TagView.as_view(), name='kioblog-tag'),
     path('tag/<slug:tag>/page/<int:page>/', views.TagView.as_view(), name='kioblog-tag-page'),
     path('search/', views.SearchView.as_view(), name='kioblog-search'),
