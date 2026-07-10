@@ -61,6 +61,20 @@ class KioblogViews(base.BaseTestCase):
         self.assertIn(self.post, response.context_data['posts'].paginator.object_list)
         self.assertNotIn(self.posts[0], response.context_data['posts'].paginator.object_list)
 
+    def test_category_pagination_preserves_filter(self) -> None:
+        response = self.client.get(
+            reverse('kioblog-category-page', kwargs={'category': self.category2.slug, 'page': 2}))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['category'], self.category2)
+        self.assertEqual(response.context_data['posts'].paginator.count, 9)
+        self.assertEqual(len(response.context_data['posts'].object_list), 4)
+
+        page1 = self.client.get(reverse('kioblog-category', kwargs={'category': self.category2.slug}))
+        html = page1.content.decode()
+        self.assertIn(
+            reverse('kioblog-category-page', kwargs={'category': self.category2.slug, 'page': 2}), html)
+        self.assertNotIn(reverse('kioblog-page', kwargs={'page': 2}), html)
+
     def test_tag_pagination_preserves_filter(self) -> None:
         tag = models.Tag.objects.create(title='django', slug='django')
         self.post.tags.add(tag)
