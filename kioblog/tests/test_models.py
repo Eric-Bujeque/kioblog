@@ -45,6 +45,11 @@ class KioblogModels(base.BaseTestCase):
         self.post.content = '# Heading\n\nRendered paragraph text.'
         self.assertEqual(self.post.display_excerpt, 'Rendered paragraph text.')
 
+    def test_display_excerpt_unescapes_html_entities(self) -> None:
+        self.post.excerpt = ''
+        self.post.content = 'AT&T sells `<x>` gadgets.'
+        self.assertEqual(self.post.display_excerpt, 'AT&T sells <x> gadgets.')
+
     def test_get_previous_and_next_break_ties_on_same_published(self) -> None:
         same_time = timezone.now()
         p1 = models.Post.objects.create(

@@ -1,4 +1,5 @@
 import re
+from html import unescape
 
 from django.db import models
 from django.conf import settings
@@ -87,7 +88,8 @@ class Post(models.Model):
         match = re.search(r'<p[^>]*>(.*?)</p>', self.content_html, re.DOTALL)
         if not match:
             return ''
-        return re.sub(r'<[^>]+>', '', match.group(1)).strip()
+        text = re.sub(r'<[^>]+>', '', match.group(1)).strip()
+        return unescape(text)
 
     def get_previous(self):
         tie_break = models.Q(published__lt=self.published) | models.Q(published=self.published, id__lt=self.id)
