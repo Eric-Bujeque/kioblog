@@ -89,10 +89,25 @@ jobs:
               print(f"::error::{version!r} is a dev/local version and can't be released", file=sys.stderr)
               raise SystemExit(1)
 
-          if f"/v{version}." not in download_url:
+          # Pull the tag out of the archive URL and compare it whole. A substring
+          # test would accept .../tags/v0.3.0.backup.tar.gz for version 0.3.0,
+          # since "/v0.3.0." occurs inside it - the metadata would then point at
+          # a different, possibly nonexistent tag while the guard reported
+          # everything in sync.
+          url_match = re.search(r"/tags/(?P<tag>[^/]+)\.tar\.gz$", download_url)
+          if not url_match:
               print(
-                  f"::error::setup.py is inconsistent: version is {version} but "
-                  f"download_url points at {download_url}. Update both before tagging.",
+                  f"::error::download_url {download_url!r} isn't a GitHub archive URL of the form "
+                  f".../tags/<tag>.tar.gz, so the tag it refers to can't be checked.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          url_tag = url_match.group("tag")
+          if url_tag != f"v{version}":
+              print(
+                  f"::error::setup.py is inconsistent: version is {version} (tag v{version}) "
+                  f"but download_url refers to tag {url_tag}. Update both before tagging.",
                   file=sys.stderr,
               )
               raise SystemExit(1)
