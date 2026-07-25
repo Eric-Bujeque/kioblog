@@ -1,24 +1,58 @@
 name: Publish to PyPI
 
-# Publishing is driven by tags, matching how releases have been cut so far
-# (v0.2.0, v0.2.1, ...). Pushing a v* tag validates, builds and uploads.
+# Manual on purpose. Cutting a tag and shipping it to PyPI are separate
+# decisions, so this never fires on its own - you run it from the Actions tab
+# and name the tag to publish.
 #
-# Tag push is the only trigger on purpose. workflow_dispatch would run against
-# whatever ref is picked in the Actions UI - on a branch that is not a tag, the
-# tag/version guard below has nothing to compare against, and an untagged build
-# could reach PyPI. To retry a failed release, use "Re-run jobs" on the original
-# run: that replays it against the same tag.
+# There is deliberately no `push: tags` trigger. With one, a tag pushed from a
+# terminal would publish immediately while a tag created by the "Tag release"
+# workflow would not (GITHUB_TOKEN pushes don't start workflow runs) - the same
+# action having two different outcomes depending on where it came from. One
+# manual trigger keeps the rule simple: nothing reaches PyPI unless you ask.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, e.g. v0.2.3 (create it first with 'Tag release')"
+        required: true
+        type: string
 
 jobs:
-  # Same checks as CI - tests, lint, generated-CSS drift and wheel contents.
-  # Tag pushes don't trigger ci.yml, so without this a release could be cut
-  # from a commit that never passed anything but `twine check`.
+  # Fail fast with a readable message if the tag is missing or malformed,
+  # rather than letting actions/checkout error out further down.
+  check-tag:
+    name: Check tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify the tag exists
+        run: |
+          TAG="${{ inputs.tag }}"
+          case "${TAG}" in
+            v*) ;;
+            *)
+              echo "::error::Tag must start with 'v' (got '${TAG}')."
+              exit 1
+              ;;
+          esac
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Tag '${TAG}' does not exist. Create it with the 'Tag release' workflow first."
+            echo "Most recent tags:"
+            git tag -l 'v*' | sort -V | tail -5
+            exit 1
+          fi
+          echo "${TAG} -> $(git rev-list -n 1 "${TAG}" | cut -c1-7)"
+
+  # Full CI against the tagged commit, not against whatever ref this run was
+  # started from - that's what the `ref` input is for.
   validate:
+    needs: check-tag
     uses: ./.github/workflows/validate.yml
+    with:
+      ref: ${{ inputs.tag }}
 
   build:
     name: Build and verify
@@ -26,6 +60,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-python@v5
         with:
@@ -39,28 +75,21 @@ jobs:
       - name: Build distributions
         run: python -m build
 
-      # setup.py's version is hand-maintained, so a tag can easily disagree
-      # with it (tagging v0.2.3 while setup.py still says 0.2.2 would publish
-      # 0.2.2 again and fail on PyPI as a duplicate). The built filename is
-      # the source of truth here. Unconditional: if this ever runs on a ref
-      # that isn't a v* tag, that's a bug and it should stop, not skip.
+      # setup.py's version is hand-maintained, so the tag can disagree with it
+      # (tagging v0.2.3 while setup.py still says 0.2.2 would rebuild 0.2.2 and
+      # fail at upload as a duplicate). The built filename is the source of
+      # truth.
       - name: Verify tag matches the built version
         run: |
-          case "${GITHUB_REF}" in
-            refs/tags/v*) ;;
-            *)
-              echo "::error::Refusing to publish from ${GITHUB_REF}; releases must come from a v* tag."
-              exit 1
-              ;;
-          esac
-          TAG="${GITHUB_REF_NAME#v}"
-          if [ ! -f "dist/kioblog-${TAG}.tar.gz" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match the version built from setup.py."
+          TAG="${{ inputs.tag }}"
+          VERSION="${TAG#v}"
+          if [ ! -f "dist/kioblog-${VERSION}.tar.gz" ]; then
+            echo "::error::Tag ${TAG} does not match the version built from setup.py at that commit."
             echo "Built artifacts:"
             ls -1 dist/
             exit 1
           fi
-          echo "Tag ${GITHUB_REF_NAME} matches dist/kioblog-${TAG}.tar.gz"
+          echo "${TAG} matches dist/kioblog-${VERSION}.tar.gz"
 
       - name: Check distribution metadata
         run: twine check dist/*
@@ -93,3 +122,38 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release:
+    name: Create GitHub release
+    # Runs after PyPI so the release records what actually shipped. Kept as its
+    # own job so the OIDC upload above keeps its narrow id-token permission and
+    # never also holds contents: write.
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # Idempotent: re-running a partly failed release tops up an existing
+      # GitHub release instead of erroring out on "already exists".
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag }}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; refreshing its assets."
+            gh release upload "${TAG}" dist/* --clobber
+          else
+            gh release create "${TAG}" dist/* --verify-tag --generate-notes
+          fi
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
