@@ -98,6 +98,10 @@ jobs:
           TAG: ${{ inputs.tag }}
           SHA: ${{ needs.check-tag.outputs.sha }}
         run: |
+          # Compare against the remote, not the snapshot this job checked out:
+          # a force-update or delete landing after checkout leaves the local ref
+          # stale and the comparison would pass on out-of-date data.
+          git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1 || true
           CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
           if [ "${CURRENT}" != "${SHA}" ]; then
             echo "::error::${TAG} moved during validation (was ${SHA}, now ${CURRENT:-missing}). Refusing to publish."
@@ -174,6 +178,10 @@ jobs:
           TAG: ${{ inputs.tag }}
           SHA: ${{ needs.check-tag.outputs.sha }}
         run: |
+          # Compare against the remote, not the snapshot this job checked out:
+          # a force-update or delete landing after checkout leaves the local ref
+          # stale and the comparison would pass on out-of-date data.
+          git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1 || true
           CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
           if [ "${CURRENT}" != "${SHA}" ]; then
             echo "::error::${TAG} moved before upload (was ${SHA}, now ${CURRENT:-missing}). Nothing published."
@@ -217,6 +225,10 @@ jobs:
           SHA: ${{ needs.check-tag.outputs.sha }}
           REPO: ${{ github.repository }}
         run: |
+          # Compare against the remote, not the snapshot this job checked out:
+          # a force-update or delete landing after checkout leaves the local ref
+          # stale and the comparison would pass on out-of-date data.
+          git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1 || true
           CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
           if [ "${CURRENT}" != "${SHA}" ]; then
             echo "::error::${TAG} no longer points at the published commit ${SHA} (now ${CURRENT:-missing})."

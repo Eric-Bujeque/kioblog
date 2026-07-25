@@ -37,6 +37,12 @@ jobs:
         with:
           python-version: "3.10"
 
+      # `packaging` is what setuptools uses to normalise versions when naming
+      # distributions, so asking it directly beats approximating PEP 440 with a
+      # regex here.
+      - name: Install packaging
+        run: python -m pip install --quiet packaging
+
       # setup.py holds the version in two places that must agree (version and
       # the tag embedded in download_url). Catching a mismatch here is far
       # cheaper than noticing after the tag is public.
@@ -58,8 +64,29 @@ jobs:
           version = find(r'version\s*=\s*["\']([^"\']+)["\']', "version")
           download_url = find(r'download_url\s*=\s*["\']([^"\']+)["\']', "download_url")
 
-          if not re.fullmatch(r"\d+\.\d+\.\d+([abc]|rc)?\d*", version):
-              print(f"::error::Version {version!r} doesn't look like a release version", file=sys.stderr)
+          # The tag has to match the filename setuptools will build, and
+          # setuptools names distributions from the *normalised* version. A
+          # value like 0.3.0rc or 01.2.3 is legal here but becomes 0.3.0rc0 or
+          # 1.2.3 in the artifact, so tagging it verbatim would produce a public
+          # tag that publish.yml can never match. Require the canonical form.
+          from packaging.version import InvalidVersion, Version
+
+          try:
+              parsed = Version(version)
+          except InvalidVersion:
+              print(f"::error::Version {version!r} is not a valid PEP 440 version", file=sys.stderr)
+              raise SystemExit(1)
+
+          if str(parsed) != version:
+              print(
+                  f"::error::setup.py declares {version!r}, which packaging normalises to "
+                  f"{str(parsed)!r}. Use the canonical form so the tag matches the built filename.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          if parsed.local or parsed.is_devrelease:
+              print(f"::error::{version!r} is a dev/local version and can't be released", file=sys.stderr)
               raise SystemExit(1)
 
           if f"/v{version}." not in download_url:
