@@ -1,7 +1,7 @@
 import importlib
 
 from django.test import SimpleTestCase, override_settings
-from django.urls import resolve, clear_url_caches
+from django.urls import clear_url_caches, resolve
 from django.urls.exceptions import Resolver404
 
 from kioblog import urls as kioblog_urls
@@ -18,11 +18,11 @@ class MediaServingTests(SimpleTestCase):
         # ourselves while the override is active so the test actually
         # observes what a real MEDIA_URL='/' consumer would get.
         try:
-            with override_settings(DEBUG=True, MEDIA_URL='/'):
+            with override_settings(DEBUG=True, MEDIA_URL="/"):
                 importlib.reload(kioblog_urls)
                 clear_url_caches()
                 with self.assertRaises(Resolver404):
-                    resolve('/some/nested/arbitrary/path', urlconf='kioblog.urls')
+                    resolve("/some/nested/arbitrary/path", urlconf="kioblog.urls")
         finally:
             importlib.reload(kioblog_urls)
             clear_url_caches()

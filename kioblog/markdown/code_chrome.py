@@ -21,9 +21,9 @@ from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 
 FENCED_BLOCK_RE = re.compile(
-    r'^(?P<fence>`{3,})[ ]*(?P<info>[^\n`]*)\n'
-    r'(?P<code>.*?)'
-    r'(?<=\n)(?P=fence)[ ]*$',
+    r"^(?P<fence>`{3,})[ ]*(?P<info>[^\n`]*)\n"
+    r"(?P<code>.*?)"
+    r"(?<=\n)(?P=fence)[ ]*$",
     re.MULTILINE | re.DOTALL,
 )
 
@@ -32,63 +32,65 @@ def _parse_info(info):
     """`python:accounts/views.py` -> ('python', 'accounts/views.py')."""
     info = info.strip()
     if not info:
-        return 'text', ''
-    lang, _, filename = info.partition(':')
-    lang = lang.strip() or 'text'
+        return "text", ""
+    lang, _, filename = info.partition(":")
+    lang = lang.strip() or "text"
     return lang, filename.strip()
 
 
 def _gutter(code):
-    lines = code.split('\n')
-    return '\n'.join(str(n) for n in range(1, len(lines) + 1))
+    lines = code.split("\n")
+    return "\n".join(str(n) for n in range(1, len(lines) + 1))
 
 
 class CodeChromePreprocessor(Preprocessor):
     def run(self, lines):
-        text = '\n'.join(lines)
+        text = "\n".join(lines)
         while True:
             m = FENCED_BLOCK_RE.search(text)
             if not m:
                 break
-            html = self._render_block(m.group('info'), m.group('code'))
+            html = self._render_block(m.group("info"), m.group("code"))
             placeholder = self.md.htmlStash.store(html)
-            text = '{}\n{}\n{}'.format(text[:m.start()], placeholder, text[m.end():])
-        return text.split('\n')
+            text = f"{text[: m.start()]}\n{placeholder}\n{text[m.end() :]}"
+        return text.split("\n")
 
     def _render_block(self, info, code):
         lang, filename = _parse_info(info)
-        code = code.rstrip('\n')
+        code = code.rstrip("\n")
 
         try:
             lexer = get_lexer_by_name(lang)
         except ClassNotFound:
-            lexer = get_lexer_by_name('text')
+            lexer = get_lexer_by_name("text")
         highlighted = highlight(
-            code, lexer, HtmlFormatter(cssclass='highlight', wrapcode=True),
+            code,
+            lexer,
+            HtmlFormatter(cssclass="highlight", wrapcode=True),
         ).strip()
 
-        file_span = ''
+        file_span = ""
         if filename:
-            file_span = '<span class="code-block__file">{}</span>'.format(escape(filename))
+            file_span = f'<span class="code-block__file">{escape(filename)}</span>'
         gutter = escape(_gutter(code))
 
         return (
-            '<figure class="code-block" data-lang="{lang}">'
+            f'<figure class="code-block" data-lang="{escape(lang)}">'
             '<div class="code-block__bar">'
             '<span class="code-block__dots"><i></i><i></i><i></i></span>'
-            '{file_span}'
-            '<span class="code-block__lang">{lang}</span>'
+            f"{file_span}"
+            f'<span class="code-block__lang">{escape(lang)}</span>'
             '<button class="code-block__copy" type="button">Copy</button>'
-            '</div>'
+            "</div>"
             '<div class="code-block__body">'
-            '<pre class="code-block__gutter" aria-hidden="true">{gutter}</pre>'
-            '{highlighted}'
-            '</div>'
-            '</figure>'
-        ).format(lang=escape(lang), file_span=file_span, gutter=gutter, highlighted=highlighted)
+            f'<pre class="code-block__gutter" aria-hidden="true">{gutter}</pre>'
+            f"{highlighted}"
+            "</div>"
+            "</figure>"
+        )
 
 
 class CodeChromeExtension(Extension):
     def extendMarkdown(self, md):
         # Priority above fenced_code (25) so we own every fence.
-        md.preprocessors.register(CodeChromePreprocessor(md), 'kioblog_code_chrome', 30)
+        md.preprocessors.register(CodeChromePreprocessor(md), "kioblog_code_chrome", 30)

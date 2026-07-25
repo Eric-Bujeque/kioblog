@@ -1,5 +1,4 @@
 from django.contrib import admin
-
 from markdownx.admin import MarkdownxModelAdmin
 
 from kioblog import models
@@ -7,25 +6,25 @@ from kioblog import models
 
 class PostAdmin(MarkdownxModelAdmin):
     prepopulated_fields = {"slug": ("title",)}
-    filter_horizontal = ('tags',)
-    list_display = ('title', 'category', 'published', 'draft', 'is_featured')
+    filter_horizontal = ("tags",)
+    list_display = ("title", "category", "published", "draft", "is_featured")
 
 
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ('title', 'slug', 'featured')
+    list_display = ("title", "slug", "featured")
 
 
 class TagAdmin(admin.ModelAdmin):
-    list_display = ('title', 'slug')
+    list_display = ("title", "slug")
     prepopulated_fields = {"slug": ("title",)}
 
 
 class CommentAdmin(admin.ModelAdmin):
-    list_display = ('username', 'post', 'parent', 'created')
+    list_display = ("username", "post", "parent", "created")
 
 
 class MetaAdmin(admin.ModelAdmin):
-    list_display = ('key', 'value')
+    list_display = ("key", "value")
 
 
 admin.site.register(models.Post, PostAdmin)

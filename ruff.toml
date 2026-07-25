@@ -1,0 +1,32 @@
+# Ruff configuration - replaces the old .flake8 config.
+# Normally run through pre-commit (see .pre-commit-config.yaml); `ruff check .`
+# and `ruff format .` work standalone too.
+#
+# Kept in ruff.toml rather than pyproject.toml on purpose: this project still
+# builds from setup.py, and adding a pyproject.toml would change how pip/build
+# pick the build backend.
+
+line-length = 120
+# Must track python_requires in setup.py, not the version CI happens to run.
+# With py310 here, ruff's pyupgrade rules would be free to rewrite code into
+# syntax that breaks the 3.8 consumers setup.py still promises to support.
+target-version = "py38"
+
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    "*.egg-info",
+    # Django-generated migrations follow their own style.
+    "kioblog/migrations",
+]
+
+[lint]
+# Core pyflakes + pycodestyle errors, plus import sorting (I), pyupgrade (UP),
+# bugbear (B) and comprehension checks (C4).
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "C4"]
+# Long lines are tolerated here, as the old .flake8 did (it ignored E501).
+# ruff-format still wraps what it can at line-length.
+ignore = ["E501"]

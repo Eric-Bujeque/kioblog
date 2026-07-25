@@ -34,7 +34,7 @@ def render_markdown(text):
             CodeChromeExtension(),
             TocExtension(baselevel=2, permalink=False),
         ],
-        output_format='html5',
+        output_format="html5",
     )
-    html = md.convert(text or '')
-    return RenderedContent(html, getattr(md, 'toc', ''))
+    html = md.convert(text or "")
+    return RenderedContent(html, getattr(md, "toc", ""))

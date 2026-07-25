@@ -1,0 +1,24 @@
+name: CI
+
+# `push` is limited to main on purpose. With a bare `push:`, every push to a
+# branch that has a PR open fires this workflow twice - once for push and once
+# for pull_request - burning double the Actions minutes and listing every check
+# twice. Between the two, PRs are covered by `pull_request` and post-merge is
+# covered by `push` to main.
+#
+# Tag pushes deliberately don't run this workflow: publish.yml calls the same
+# validate.yml directly, so a release is gated on these checks without also
+# duplicating them into a second parallel run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch supersedes the run in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml

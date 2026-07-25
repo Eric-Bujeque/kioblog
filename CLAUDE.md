@@ -16,10 +16,15 @@ python manage.py test kioblog.tests.test_views.KioblogViews.test_post   # single
 python manage.py makemigrations kioblog # after changing models.py
 python manage.py migrate
 python manage.py runserver              # dev server; blog lives at /blog/, admin at /admin/
-flake8                                  # lint (config in .flake8; CI fails on lint errors)
+pre-commit run --all-files              # lint/format everything (same hooks CI runs)
+pre-commit install                      # once per clone, to run the hooks on commit
 ```
 
-CI ([.circleci/config.yml](.circleci/config.yml)) runs `flake8` then `python3 manage.py test -v 2` on Python 3.8. `.flake8` ignores `D203` and `E501` (line length), and excludes `manage.py`.
+**Lint/format is ruff, driven by pre-commit** ([.pre-commit-config.yaml](.pre-commit-config.yaml)); rules live in [ruff.toml](ruff.toml) (line-length 120, `E501` ignored, `kioblog/migrations` excluded). The rule set is pinned explicitly rather than relying on ruff's defaults, which shift between releases. `kioblog/static/kioblog/code.css` is excluded from the hooks because it is generated — a whitespace hook rewriting it would fight `regenerate_code_css`.
+
+CI is GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)), on every push and PR, with three jobs: **lint** (runs the pre-commit hooks), **test** (`manage.py test -v 2`), and **package** (builds the sdist/wheel, `twine check`, and asserts templates/static/migrations are actually inside the wheel — MANIFEST.in omissions have shipped broken releases before). Everything runs on **Python 3.10**: `requirements.txt` pins Django 3.2, which supports no higher. Raising the Python version means bumping Django first.
+
+Note CI deliberately does **not** run `makemigrations --check` — the stale `Page` model (see the migration note below) would fail it.
 
 ## Architecture
 
@@ -49,7 +54,13 @@ Templates live in `kioblog/templates/kioblog/` and static in `kioblog/static/kio
 
 ## Releasing
 
-Version is hardcoded in **three places that must stay in sync**: `version` and `download_url` (the git tag) in [setup.py](setup.py), and the git tag itself. Bump, tag, and publish to PyPI. `requirements.txt` pins the dev project's deps; `install_requires` in setup.py declares the looser runtime floors (`Django>=3.0`, `Markdown`, `Pygments`, `django-markdownx`). When adding a static asset used by the render pipeline (e.g. a regenerated `code.css`), confirm it is committed — it ships via MANIFEST.in.
+Version is hardcoded in **three places that must stay in sync**: `version` and `download_url` (the git tag) in [setup.py](setup.py), and the git tag itself.
+
+Publishing is automated: pushing a `v*` tag triggers [.github/workflows/publish.yml](.github/workflows/publish.yml), which builds, **verifies the tag matches the version built from setup.py** (so tagging `v0.2.3` while setup.py still says `0.2.2` fails loudly instead of re-publishing the old version), runs `twine check`, and uploads via **PyPI Trusted Publishing (OIDC)** — there is no API token stored in the repo. The upload runs in the `pypi` GitHub environment, so adding required reviewers there gates releases behind a manual approval.
+
+So a release is: bump both spots in `setup.py` → merge → tag `vX.Y.Z` → push the tag.
+
+`requirements.txt` pins the dev project's deps; `install_requires` in setup.py declares the looser runtime floors (`Django>=3.0`, `Markdown`, `Pygments`, `django-markdownx`). When adding a static asset used by the render pipeline (e.g. a regenerated `code.css`), confirm it is committed — it ships via MANIFEST.in, and the CI `package` job checks that.
 
 ## Note on SPEC_ericbujeque_blog.md
 
