@@ -1,0 +1,20 @@
+# Normalise line endings: LF in the repository and in working copies on every
+# platform.
+#
+# Without this, Git on Windows (core.autocrlf=true) checks files out as CRLF,
+# the mixed-line-ending hook added in .pre-commit-config.yaml rewrites them all
+# back to LF on the first run after every fresh clone, and they then show up as
+# modified even though `git diff` reports no content change at all. Pinning
+# eol=lf makes that hook a genuine no-op instead.
+* text=auto eol=lf
+
+# Never munge binaries. text=auto detects most of these anyway; listing the
+# ones a blog package is likely to grow makes it explicit.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
