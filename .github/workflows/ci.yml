@@ -46,6 +46,18 @@ jobs:
       - name: Run tests
         run: python manage.py test -v 2
 
+      # code.css is generated from OneDarkStyle. Catch it drifting - either
+      # hand-edited, or left stale after a Pygments bump.
+      - name: Check the shipped code.css is up to date
+        run: |
+          python manage.py regenerate_code_css
+          if ! git diff --quiet -- kioblog/static/kioblog/code.css; then
+            echo "::error::kioblog/static/kioblog/code.css is out of date."
+            echo "Run 'python manage.py regenerate_code_css' and commit the result."
+            git --no-pager diff -- kioblog/static/kioblog/code.css
+            exit 1
+          fi
+
   package:
     name: Package
     runs-on: ubuntu-latest
