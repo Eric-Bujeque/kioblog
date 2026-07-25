@@ -60,8 +60,16 @@ jobs:
             git tag -l 'v*' | sort -V | tail -5
             exit 1
           fi
-          # rev-list peels annotated tags down to the commit.
-          SHA="$(git rev-list -n 1 "refs/tags/${TAG}")"
+          # ^{commit} peels annotated tags and, crucially, fails for a tag that
+          # targets a tree or a blob - which git permits. `git rev-list -n 1` is
+          # not enough here: on such a tag it exits 0 and prints nothing, and an
+          # empty ref makes actions/checkout silently fall back to the ref this
+          # run was dispatched from.
+          SHA="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" || true)"
+          if [ -z "${SHA}" ]; then
+            echo "::error::Tag '${TAG}' does not point at a commit; refusing to publish it."
+            exit 1
+          fi
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "${TAG} -> ${SHA}"
 
@@ -90,7 +98,7 @@ jobs:
           TAG: ${{ inputs.tag }}
           SHA: ${{ needs.check-tag.outputs.sha }}
         run: |
-          CURRENT="$(git rev-list -n 1 "refs/tags/${TAG}" 2>/dev/null || true)"
+          CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
           if [ "${CURRENT}" != "${SHA}" ]; then
             echo "::error::${TAG} moved during validation (was ${SHA}, now ${CURRENT:-missing}). Refusing to publish."
             exit 1
@@ -135,7 +143,7 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [check-tag, build]
     runs-on: ubuntu-latest
     # Add required reviewers to this environment in the repo settings if you
     # want a manual approval gate before anything reaches PyPI.
@@ -150,6 +158,29 @@ jobs:
       # to the publish step below.
       id-token: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-tag.outputs.sha }}
+          fetch-depth: 0
+
+      # Last gate before the one irreversible step in this workflow. build
+      # checked the tag too, but this job can sit for a long time waiting on
+      # `pypi` environment approval, and the tag can move in that window.
+      # Checking after approval means a race aborts *before* the upload rather
+      # than being noticed by the release job afterwards - by which point the
+      # version is on PyPI for good, pointing at a tag that has moved on.
+      - name: Re-check the tag immediately before uploading
+        env:
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ needs.check-tag.outputs.sha }}
+        run: |
+          CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
+          if [ "${CURRENT}" != "${SHA}" ]; then
+            echo "::error::${TAG} moved before upload (was ${SHA}, now ${CURRENT:-missing}). Nothing published."
+            exit 1
+          fi
+          echo "${TAG} still at ${SHA}; proceeding with upload."
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
@@ -186,7 +217,7 @@ jobs:
           SHA: ${{ needs.check-tag.outputs.sha }}
           REPO: ${{ github.repository }}
         run: |
-          CURRENT="$(git rev-list -n 1 "refs/tags/${TAG}" 2>/dev/null || true)"
+          CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
           if [ "${CURRENT}" != "${SHA}" ]; then
             echo "::error::${TAG} no longer points at the published commit ${SHA} (now ${CURRENT:-missing})."
             exit 1
