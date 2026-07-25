@@ -9,6 +9,18 @@ name: Publish to PyPI
 # workflow would not (GITHUB_TOKEN pushes don't start workflow runs) - the same
 # action having two different outcomes depending on where it came from. One
 # manual trigger keeps the rule simple: nothing reaches PyPI unless you ask.
+#
+# Two rules hold throughout, both learned the hard way in review:
+#
+#  1. `${{ ... }}` never appears inside a `run:` block. Actions interpolates
+#     those textually before the shell sees them, and git happily accepts tag
+#     names containing $(), backticks or `;` - so a crafted tag would execute
+#     as code. Values come in through `env:` and are used as quoted shell
+#     variables instead.
+#  2. Everything after check-tag works from the commit SHA that job resolved,
+#     never from the tag name. Tags are mutable; re-resolving the name in each
+#     job would let a force-update between validation and build ship a commit
+#     that was never validated.
 on:
   workflow_dispatch:
     inputs:
@@ -18,19 +30,23 @@ on:
         type: string
 
 jobs:
-  # Fail fast with a readable message if the tag is missing or malformed,
-  # rather than letting actions/checkout error out further down.
+  # Fail fast with a readable message if the tag is missing or malformed, and
+  # pin the rest of the run to the commit it points at right now.
   check-tag:
     name: Check tag
     runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Verify the tag exists
+      - name: Resolve the tag to a commit
+        id: resolve
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          TAG="${{ inputs.tag }}"
           case "${TAG}" in
             v*) ;;
             *)
@@ -44,24 +60,41 @@ jobs:
             git tag -l 'v*' | sort -V | tail -5
             exit 1
           fi
-          echo "${TAG} -> $(git rev-list -n 1 "${TAG}" | cut -c1-7)"
+          # rev-list peels annotated tags down to the commit.
+          SHA="$(git rev-list -n 1 "refs/tags/${TAG}")"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "${TAG} -> ${SHA}"
 
-  # Full CI against the tagged commit, not against whatever ref this run was
-  # started from - that's what the `ref` input is for.
+  # Full CI against the resolved commit, not against whatever ref this run was
+  # started from - that's what validate.yml's `ref` input is for.
   validate:
     needs: check-tag
     uses: ./.github/workflows/validate.yml
     with:
-      ref: ${{ inputs.tag }}
+      ref: ${{ needs.check-tag.outputs.sha }}
 
   build:
     name: Build and verify
-    needs: validate
+    needs: [check-tag, validate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.check-tag.outputs.sha }}
+          fetch-depth: 0
+
+      # Validation has just finished on this SHA. If the tag was force-updated
+      # in the meantime, publishing it now would ship an unvalidated commit.
+      - name: Re-check the tag still points at the validated commit
+        env:
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ needs.check-tag.outputs.sha }}
+        run: |
+          CURRENT="$(git rev-list -n 1 "refs/tags/${TAG}" 2>/dev/null || true)"
+          if [ "${CURRENT}" != "${SHA}" ]; then
+            echo "::error::${TAG} moved during validation (was ${SHA}, now ${CURRENT:-missing}). Refusing to publish."
+            exit 1
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -80,8 +113,9 @@ jobs:
       # fail at upload as a duplicate). The built filename is the source of
       # truth.
       - name: Verify tag matches the built version
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          TAG="${{ inputs.tag }}"
           VERSION="${TAG#v}"
           if [ ! -f "dist/kioblog-${VERSION}.tar.gz" ]; then
             echo "::error::Tag ${TAG} does not match the version built from setup.py at that commit."
@@ -128,14 +162,14 @@ jobs:
     # Runs after PyPI so the release records what actually shipped. Kept as its
     # own job so the OIDC upload above keeps its narrow id-token permission and
     # never also holds contents: write.
-    needs: publish
+    needs: [check-tag, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.check-tag.outputs.sha }}
           fetch-depth: 0
 
       - uses: actions/download-artifact@v4
@@ -148,12 +182,19 @@ jobs:
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ needs.check-tag.outputs.sha }}
+          REPO: ${{ github.repository }}
         run: |
-          TAG="${{ inputs.tag }}"
+          CURRENT="$(git rev-list -n 1 "refs/tags/${TAG}" 2>/dev/null || true)"
+          if [ "${CURRENT}" != "${SHA}" ]; then
+            echo "::error::${TAG} no longer points at the published commit ${SHA} (now ${CURRENT:-missing})."
+            exit 1
+          fi
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "Release ${TAG} already exists; refreshing its assets."
             gh release upload "${TAG}" dist/* --clobber
           else
             gh release create "${TAG}" dist/* --verify-tag --generate-notes
           fi
-          echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/${REPO}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"

@@ -74,9 +74,14 @@ jobs:
           print(f"tag=v{version}")
           PY
 
+      # As in publish.yml, values reach the shell through env: rather than
+      # `${{ }}` interpolation. The version is regex-checked above so it can't
+      # carry shell metacharacters, but keeping the rule unconditional means
+      # there's no judgement call to get wrong later.
       - name: Refuse if the tag already exists
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
             echo "::error::${TAG} already exists. Bump the version in setup.py first."
             echo "Existing tags:"
@@ -85,8 +90,9 @@ jobs:
           fi
 
       - name: Create and push the tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "${TAG}" -m "${TAG}"
@@ -94,8 +100,9 @@ jobs:
           echo "Pushed ${TAG} at $(git rev-parse --short HEAD)"
 
       - name: Summary
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
           {
             echo "### Tagged \`${TAG}\`"
             echo
