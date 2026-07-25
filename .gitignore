@@ -102,7 +102,13 @@ celerybeat.pid
 *.sage.py
 
 # Environments
+# .env.* too, not just .env: variants like .env.staging or .env.test hold
+# secrets just the same. Templates are allowed back in below.
 .env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
 .venv
 env/
 venv/
