@@ -7,7 +7,10 @@
 # pick the build backend.
 
 line-length = 120
-target-version = "py310"
+# Must track python_requires in setup.py, not the version CI happens to run.
+# With py310 here, ruff's pyupgrade rules would be free to rewrite code into
+# syntax that breaks the 3.8 consumers setup.py still promises to support.
+target-version = "py38"
 
 exclude = [
     ".git",
