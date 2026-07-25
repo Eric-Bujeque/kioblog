@@ -101,7 +101,14 @@ jobs:
           # Compare against the remote, not the snapshot this job checked out:
           # a force-update or delete landing after checkout leaves the local ref
           # stale and the comparison would pass on out-of-date data.
-          git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1 || true
+          #
+          # This must fail closed. Swallowing a network or auth error here would
+          # silently fall back to that stale local ref - exactly the state the
+          # fetch exists to rule out.
+          if ! git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1; then
+            echo "::error::Could not refresh tags from origin; refusing to compare against a possibly stale local ref."
+            exit 1
+          fi
           CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
           if [ "${CURRENT}" != "${SHA}" ]; then
             echo "::error::${TAG} moved during validation (was ${SHA}, now ${CURRENT:-missing}). Refusing to publish."
@@ -155,6 +162,10 @@ jobs:
       name: pypi
       url: https://pypi.org/project/kioblog/
     permissions:
+      # Naming any permission sets every unnamed one to `none`, so contents has
+      # to be listed explicitly: this job checks out and fetches from origin,
+      # and would fail outright without read access.
+      contents: read
       # Required for PyPI Trusted Publishing (OIDC). No API token is stored
       # anywhere: PyPI verifies this workflow's short-lived identity instead.
       # To use an API token instead, drop this block and pass
@@ -181,7 +192,14 @@ jobs:
           # Compare against the remote, not the snapshot this job checked out:
           # a force-update or delete landing after checkout leaves the local ref
           # stale and the comparison would pass on out-of-date data.
-          git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1 || true
+          #
+          # This must fail closed. Swallowing a network or auth error here would
+          # silently fall back to that stale local ref - exactly the state the
+          # fetch exists to rule out.
+          if ! git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1; then
+            echo "::error::Could not refresh tags from origin; refusing to compare against a possibly stale local ref."
+            exit 1
+          fi
           CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
           if [ "${CURRENT}" != "${SHA}" ]; then
             echo "::error::${TAG} moved before upload (was ${SHA}, now ${CURRENT:-missing}). Nothing published."
@@ -228,7 +246,14 @@ jobs:
           # Compare against the remote, not the snapshot this job checked out:
           # a force-update or delete landing after checkout leaves the local ref
           # stale and the comparison would pass on out-of-date data.
-          git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1 || true
+          #
+          # This must fail closed. Swallowing a network or auth error here would
+          # silently fall back to that stale local ref - exactly the state the
+          # fetch exists to rule out.
+          if ! git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1; then
+            echo "::error::Could not refresh tags from origin; refusing to compare against a possibly stale local ref."
+            exit 1
+          fi
           CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
           if [ "${CURRENT}" != "${SHA}" ]; then
             echo "::error::${TAG} no longer points at the published commit ${SHA} (now ${CURRENT:-missing})."
