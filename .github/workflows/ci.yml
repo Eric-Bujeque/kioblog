@@ -5,6 +5,10 @@ name: CI
 # for pull_request - burning double the Actions minutes and listing every check
 # twice. Between the two, PRs are covered by `pull_request` and post-merge is
 # covered by `push` to main.
+#
+# Tag pushes deliberately don't run this workflow: publish.yml calls the same
+# validate.yml directly, so a release is gated on these checks without also
+# duplicating them into a second parallel run.
 on:
   push:
     branches: [main]
@@ -16,95 +20,5 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      # Runs the hooks from .pre-commit-config.yaml, so CI and a local
-      # `pre-commit run --all-files` check exactly the same things.
-      - uses: pre-commit/action@v3.0.1
-
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # Pinned to 3.10: requirements.txt pins Django 3.2, which supports up to
-      # Python 3.10. Raising this means bumping Django first.
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-          cache: pip
-          cache-dependency-path: requirements.txt
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run tests
-        run: python manage.py test -v 2
-
-      # code.css is generated from OneDarkStyle. Catch it drifting - either
-      # hand-edited, or left stale after a Pygments bump.
-      - name: Check the shipped code.css is up to date
-        run: |
-          python manage.py regenerate_code_css
-          if ! git diff --quiet -- kioblog/static/kioblog/code.css; then
-            echo "::error::kioblog/static/kioblog/code.css is out of date."
-            echo "Run 'python manage.py regenerate_code_css' and commit the result."
-            git --no-pager diff -- kioblog/static/kioblog/code.css
-            exit 1
-          fi
-
-  package:
-    name: Package
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install build tooling
-        run: |
-          python -m pip install --upgrade pip
-          pip install build twine
-
-      - name: Build distributions
-        run: python -m build
-
-      - name: Check distribution metadata
-        run: twine check dist/*
-
-      # kioblog ships templates and static via MANIFEST.in, and leaving a new
-      # asset out of it has silently shipped broken releases before. Fail here
-      # rather than after publishing.
-      - name: Assert templates and static are bundled
-        run: |
-          python - <<'PY'
-          import sys, zipfile, pathlib
-
-          wheel = next(pathlib.Path("dist").glob("*.whl"))
-          names = zipfile.ZipFile(wheel).namelist()
-
-          required = {
-              "templates": "kioblog/templates/kioblog/base.html",
-              "static": "kioblog/static/kioblog/code.css",
-              "migrations": "kioblog/migrations/0001_initial.py",
-          }
-          missing = [f"{label} ({path})" for label, path in required.items() if path not in names]
-          if missing:
-              print(f"::error::{wheel.name} is missing: {', '.join(missing)}")
-              print("Check MANIFEST.in / package_data in setup.py.")
-              sys.exit(1)
-          print(f"{wheel.name}: templates, static and migrations all present ({len(names)} files).")
-          PY
+  validate:
+    uses: ./.github/workflows/validate.yml

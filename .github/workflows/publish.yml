@@ -1,17 +1,28 @@
 name: Publish to PyPI
 
 # Publishing is driven by tags, matching how releases have been cut so far
-# (v0.2.0, v0.2.1, ...). Pushing a v* tag builds, verifies and uploads.
+# (v0.2.0, v0.2.1, ...). Pushing a v* tag validates, builds and uploads.
+#
+# Tag push is the only trigger on purpose. workflow_dispatch would run against
+# whatever ref is picked in the Actions UI - on a branch that is not a tag, the
+# tag/version guard below has nothing to compare against, and an untagged build
+# could reach PyPI. To retry a failed release, use "Re-run jobs" on the original
+# run: that replays it against the same tag.
 on:
   push:
     tags:
       - "v*"
-  # Lets you re-run a publish from the Actions tab without re-tagging.
-  workflow_dispatch:
 
 jobs:
+  # Same checks as CI - tests, lint, generated-CSS drift and wheel contents.
+  # Tag pushes don't trigger ci.yml, so without this a release could be cut
+  # from a commit that never passed anything but `twine check`.
+  validate:
+    uses: ./.github/workflows/validate.yml
+
   build:
     name: Build and verify
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,10 +42,17 @@ jobs:
       # setup.py's version is hand-maintained, so a tag can easily disagree
       # with it (tagging v0.2.3 while setup.py still says 0.2.2 would publish
       # 0.2.2 again and fail on PyPI as a duplicate). The built filename is
-      # the source of truth here.
+      # the source of truth here. Unconditional: if this ever runs on a ref
+      # that isn't a v* tag, that's a bug and it should stop, not skip.
       - name: Verify tag matches the built version
-        if: startsWith(github.ref, 'refs/tags/')
         run: |
+          case "${GITHUB_REF}" in
+            refs/tags/v*) ;;
+            *)
+              echo "::error::Refusing to publish from ${GITHUB_REF}; releases must come from a v* tag."
+              exit 1
+              ;;
+          esac
           TAG="${GITHUB_REF_NAME#v}"
           if [ ! -f "dist/kioblog-${TAG}.tar.gz" ]; then
             echo "::error::Tag ${GITHUB_REF_NAME} does not match the version built from setup.py."
