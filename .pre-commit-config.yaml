@@ -56,23 +56,26 @@ repos:
   # Local custom hooks
   - repo: local
     hooks:
-      # Prevent committing .env files with secrets (defense in depth)
+      # Prevent committing .env files with secrets (defense in depth).
+      #
+      # Uses pre-commit's built-in `fail` language, which trips whenever a file
+      # matches `files` below, rather than shelling out to `git diff --cached`.
+      # That matters for the case this hook exists for: someone bypassing the
+      # local hook with --no-verify and pushing. On CI's clean checkout the
+      # index already matches HEAD, so `git diff --cached` is empty and a
+      # shell-based check silently passes. Letting pre-commit supply the
+      # filenames means the same rule applies at commit time and under
+      # `--all-files` in CI.
+      #
+      # The pattern deliberately anchors at end-of-name, so .env.example,
+      # .env.template and .env.sample stay allowed.
       - id: forbid-dotenv
         name: forbid .env files (secrets)
-        entry: bash -c
-        args:
-          - |
-            FILES=$(git diff --cached --name-only | grep -E "(^|/)\.env(\.local|\.production|\.development)?$" | grep -v -E "\.env\.(example|template|sample)$")
-            if [ -n "$FILES" ]; then
-              echo "❌ ERROR: Do not commit .env files!"
-              echo "$FILES"
-              echo "These files contain secrets and should never be committed."
-              echo "Files like .env.example are allowed."
-              exit 1
-            fi
-        language: system
-        pass_filenames: false
-        always_run: false
+        entry: >-
+          Do not commit .env files - they hold secrets.
+          Templates such as .env.example are fine.
+        language: fail
+        files: '(^|/)\.env(\.local|\.production|\.development)?$'
 
 # Global exclusions
 exclude: |
