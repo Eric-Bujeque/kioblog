@@ -1,0 +1,77 @@
+name: Publish to PyPI
+
+# Publishing is driven by tags, matching how releases have been cut so far
+# (v0.2.0, v0.2.1, ...). Pushing a v* tag builds, verifies and uploads.
+on:
+  push:
+    tags:
+      - "v*"
+  # Lets you re-run a publish from the Actions tab without re-tagging.
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build and verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build distributions
+        run: python -m build
+
+      # setup.py's version is hand-maintained, so a tag can easily disagree
+      # with it (tagging v0.2.3 while setup.py still says 0.2.2 would publish
+      # 0.2.2 again and fail on PyPI as a duplicate). The built filename is
+      # the source of truth here.
+      - name: Verify tag matches the built version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ ! -f "dist/kioblog-${TAG}.tar.gz" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match the version built from setup.py."
+            echo "Built artifacts:"
+            ls -1 dist/
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches dist/kioblog-${TAG}.tar.gz"
+
+      - name: Check distribution metadata
+        run: twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Add required reviewers to this environment in the repo settings if you
+    # want a manual approval gate before anything reaches PyPI.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/kioblog/
+    permissions:
+      # Required for PyPI Trusted Publishing (OIDC). No API token is stored
+      # anywhere: PyPI verifies this workflow's short-lived identity instead.
+      # To use an API token instead, drop this block and pass
+      #   password: ${{ secrets.PYPI_API_TOKEN }}
+      # to the publish step below.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
