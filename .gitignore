@@ -140,3 +140,8 @@ dmypy.json
 .idea
 !/.idea/
 .idea/*
+
+# Claude Code local dev-server launch config (machine-specific paths/ports).
+# .claude/settings.local.json is already covered by a global git ignore rule;
+# this repo-level entry covers launch.json the same way.
+.claude/launch.json
