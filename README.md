@@ -202,8 +202,7 @@ template disappears silently.
 
 ### Code blocks
 
-kioblog emits this structure and **the class names are a stable contract** —
-style them, don't expect them to change:
+kioblog wraps each highlighted block in this structure:
 
 ```html
 <figure class="code-block" data-lang="python">
@@ -216,14 +215,22 @@ style them, don't expect them to change:
   <div class="code-block__body">
     <pre class="code-block__gutter" aria-hidden="true">1
 2</pre>
-    <div class="highlight"><pre><code>…highlighted tokens…</code></pre></div>
+    <div class="highlight"><pre><span></span><code>…token spans…</code></pre></div>
   </div>
 </figure>
 ```
 
-`code-block__file` is omitted when the fence has no filename. The line-number
-gutter is a separate element so that selecting the code does not pick up the
-numbers.
+**The `code-block__*` names are a stable contract** — kioblog owns them and
+won't rename them under you. `code-block__file` is omitted when the fence has
+no filename. The line-number gutter is a separate element so that selecting
+the code doesn't pick up the numbers.
+
+**Everything from `.highlight` inwards is Pygments' output, not kioblog's**,
+and is not promised to keep its exact shape across Pygments releases — note
+the empty `<span></span>` it currently emits before `<code>`. Style it through
+the token classes (`.highlight .k`, `.s`, `.c1`, …) rather than by walking the
+tree; something like `pre.firstElementChild` would land on that empty span
+today and may land elsewhere tomorrow.
 
 kioblog ships token colours only, as a One Dark Pygments stylesheet:
 
