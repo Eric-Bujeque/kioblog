@@ -54,14 +54,15 @@ Templates live in `kioblog/templates/kioblog/` and static in `kioblog/static/kio
 
 ## Releasing
 
-Version is hardcoded in **three places that must stay in sync**: `version` and `download_url` (the git tag) in [setup.py](setup.py), and the git tag itself.
+**The git tag is the version.** There is no `version=` in [setup.py](setup.py): `setuptools_scm` (wired up in [pyproject.toml](pyproject.toml)) derives it from the latest tag at build time. Nothing to keep in sync, and no PR needed just to bump a number.
 
-A release is four deliberate steps, and **the last two are manual triggers in the Actions tab, not something that happens on merge**:
+The catch is that **a build must be able to see the tags**. `setuptools_scm` does not fail on a shallow checkout — it warns and emits a `0.1.devN+g<sha>` placeholder — so every job that runs `python -m build` checks out with `fetch-depth: 0`. `publish.yml` asserts the built filename matches the tag, which is what turns that silent failure into a loud one.
 
-1. Bump `version` **and** `download_url` in `setup.py`, via a PR like any other change.
-2. Merge to `main`.
-3. Run **Tag release** ([tag-release.yml](.github/workflows/tag-release.yml)). It reads the version straight out of `setup.py` on `main` — there is nothing to type, so the tag can't disagree with the code. It refuses to run off any branch but `main`, refuses if `version` and `download_url` disagree, and refuses if the tag already exists.
-4. Run **Publish to PyPI** ([publish.yml](.github/workflows/publish.yml)) and give it that tag.
+A release is three deliberate steps, and **both workflow steps are manual triggers in the Actions tab, not something that happens on merge**:
+
+1. Merge whatever you want to ship to `main`.
+2. Run **Tag release** ([tag-release.yml](.github/workflows/tag-release.yml)) and pick `patch`, `minor` or `major`. It reads the highest existing `vX.Y.Z` tag and does the arithmetic, so no version is ever typed. It refuses to run off any branch but `main`, refuses if `HEAD` is already a release tag (which would put two version numbers on one commit), and refuses if the computed tag somehow exists. Older non-canonical tags like `v0.1-alpha` are ignored by the maths.
+3. Run **Publish to PyPI** ([publish.yml](.github/workflows/publish.yml)) and give it the tag step 2 printed.
 
 Publishing never happens on its own. There is no `push: tags` trigger, deliberately: a tag pushed by step 3 wouldn't fire it anyway (GitHub does not start workflow runs for pushes made with `GITHUB_TOKEN`), so a tag pushed from a terminal behaving differently from one made by the workflow would be a trap. One manual trigger keeps the rule simple.
 
