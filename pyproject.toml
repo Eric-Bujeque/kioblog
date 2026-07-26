@@ -1,0 +1,17 @@
+# Build configuration.
+#
+# This file exists for two reasons and deliberately does nothing else - project
+# metadata stays in setup.py:
+#
+#  1. `[build-system].requires` is the only way to get setuptools_scm installed
+#     into the isolated environment `python -m build` creates. The legacy
+#     alternative, `setup_requires=`, is deprecated and unreliable with modern
+#     pip.
+#  2. The presence of `[tool.setuptools_scm]` is what activates the plugin, so
+#     the version comes from the latest git tag instead of a literal in
+#     setup.py.
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]

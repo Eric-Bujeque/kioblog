@@ -1,2 +1,19 @@
 recursive-include kioblog/templates *
 recursive-include kioblog/static *
+
+# setuptools_scm's file finder sweeps every git-tracked file into the sdist,
+# which is more than this project wants to publish. Prune the development-only
+# parts back out: kioblogdev is the throwaway project used to run the app while
+# developing and has never been part of the distribution, and the rest is repo
+# tooling with no meaning to an installed copy.
+#
+# The wheel is unaffected either way - find_packages() already decides that.
+prune kioblogdev
+prune .github
+exclude .gitattributes
+exclude .gitignore
+exclude .pre-commit-config.yaml
+exclude ruff.toml
+exclude manage.py
+exclude requirements.txt
+exclude CLAUDE.md
