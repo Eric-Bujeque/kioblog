@@ -185,10 +185,20 @@ Useful things on `Post` when writing your own:
 | `post.tags.all` | Tags |
 | `post.get_previous`, `post.get_next`, `post.related_posts` | Navigation |
 
-Context available: `posts`, `page_range` and `recent_posts` everywhere;
-plus `category` and `featured_post` on the list, `tag` on tag archives,
-`query`/`count` on search, and `prev_post`/`next_post`/`related_posts` on a
-post.
+Context varies by template — only `recent_posts` is present everywhere, so
+check this before relying on a variable:
+
+| Template | Context |
+| --- | --- |
+| `home.html` (post list) | `posts`, `page_range`, `recent_posts`, `featured_post`, `category` |
+| `home.html` (tag archive) | `posts`, `page_range`, `recent_posts`, `tag` |
+| `search.html` | `posts`, `query`, `count`, `recent_posts` |
+| `post.html` | `post`, `prev_post`, `next_post`, `related_posts`, `recent_posts` |
+
+Note `search.html` has no `page_range` (results are not paginated) and
+`post.html` has neither `posts` nor `page_range`. Django renders a missing
+variable as empty rather than raising, so a paginator copied into the wrong
+template disappears silently.
 
 ### Code blocks
 
