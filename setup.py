@@ -1,4 +1,12 @@
+from pathlib import Path
+
 from setuptools import find_packages, setup
+
+# setup.cfg used to carry `description-file = README.md`, which is the
+# distutils-era spelling setuptools ignores - so the PyPI page has been blank
+# this whole time. Reading it here is explicit and keeps metadata in one file.
+# README.md ships in the sdist, so this also works when building from one.
+LONG_DESCRIPTION = (Path(__file__).parent / "README.md").read_text(encoding="utf-8")
 
 # No `version=` here on purpose. setuptools_scm derives it from the latest git
 # tag at build time (see pyproject.toml), so the tag is the single source of
@@ -18,7 +26,9 @@ setup(
     package_data={"templates": ["kioblog/templates/*"]},
     include_package_data=True,
     license="MIT",
-    description="Simple blog for Django",
+    description="Reusable Markdown blog app for Django, with syntax-highlighted code blocks",
+    long_description=LONG_DESCRIPTION,
+    long_description_content_type="text/markdown",
     author="Eric Bujeque",
     author_email="noikzyr3@gmail.com",
     url="https://github.com/Eric-Bujeque/kioblog",
