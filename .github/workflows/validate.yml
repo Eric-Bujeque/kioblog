@@ -74,9 +74,15 @@ jobs:
     name: Package
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 is required, not tidiness: setuptools_scm derives the
+      # version from the tag history, and a shallow checkout has none. It does
+      # not fail either - it quietly emits a 0.1.devN+g<sha> placeholder - so a
+      # shallow clone here would have this job validating a package numbered
+      # nothing like the real one.
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

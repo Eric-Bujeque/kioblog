@@ -127,17 +127,21 @@ jobs:
       - name: Build distributions
         run: python -m build
 
-      # setup.py's version is hand-maintained, so the tag can disagree with it
-      # (tagging v0.2.3 while setup.py still says 0.2.2 would rebuild 0.2.2 and
-      # fail at upload as a duplicate). The built filename is the source of
-      # truth.
-      - name: Verify tag matches the built version
+      # The version now comes from the tag via setuptools_scm, so this can no
+      # longer catch a hand-maintained number drifting - it catches the build
+      # not seeing the tag at all. setuptools_scm does not fail on a shallow
+      # checkout; it warns and emits a 0.1.devN+g<sha> placeholder, which would
+      # otherwise sail through and upload a garbage version to PyPI for good.
+      # The built filename is the evidence that the tag was actually resolved.
+      - name: Verify the build resolved the tag as its version
         env:
           TAG: ${{ inputs.tag }}
         run: |
           VERSION="${TAG#v}"
           if [ ! -f "dist/kioblog-${VERSION}.tar.gz" ]; then
-            echo "::error::Tag ${TAG} does not match the version built from setup.py at that commit."
+            echo "::error::Build did not produce version ${VERSION} for tag ${TAG}."
+            echo "setuptools_scm derives the version from git tags; a dev/placeholder"
+            echo "version here means the tag was not visible to the build."
             echo "Built artifacts:"
             ls -1 dist/
             exit 1
