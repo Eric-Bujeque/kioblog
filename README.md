@@ -1,2 +1,231 @@
 # kioblog
-Reusable blog app
+
+A reusable blog app for Django, distributed on PyPI. Mount it under any URL
+prefix in an existing project and re-skin it by overriding templates.
+
+Posts are written in **Markdown**. Fenced code blocks are highlighted with
+Pygments and wrapped in a documented HTML structure you style yourself, so the
+blog looks like the rest of your site rather than like a plugin.
+
+- Markdown posts with syntax-highlighted code blocks and a generated table of
+  contents
+- Categories, tags, full-text search, reading-time estimates, related posts and
+  previous/next navigation
+- Markdown editor in the Django admin with a live preview that renders through
+  the same pipeline as the public page
+- `robots.txt` and `sitemap.xml` out of the box
+
+## Requirements
+
+- Python 3.8+
+- Django 3.0+
+
+`Markdown`, `Pygments`, `django-markdownx` and `django-robots` are installed
+automatically as dependencies.
+
+## Install
+
+```bash
+pip install kioblog
+```
+
+### 1. Add the apps
+
+```python
+INSTALLED_APPS = [
+    # ... your apps ...
+    "django.contrib.sites",      # required by django-robots
+    "django.contrib.sitemaps",
+    "robots",
+    "markdownx",
+    "kioblog",
+]
+
+SITE_ID = 1
+```
+
+### 2. Register the context processors
+
+Without these the sidebar and site-wide settings render empty.
+
+```python
+TEMPLATES = [
+    {
+        # ...
+        "OPTIONS": {
+            "context_processors": [
+                # ... the Django defaults ...
+                "kioblog.context_preprocessors.kioblog_settings",
+                "kioblog.context_preprocessors.kioblog_categories",
+            ],
+        },
+    },
+]
+```
+
+### 3. Point uploads somewhere
+
+`UPLOAD_TO` is where post cover images are stored, relative to `MEDIA_ROOT`.
+
+```python
+UPLOAD_TO = "kioblog"
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+```
+
+> kioblog does **not** serve media itself, deliberately — that is your
+> project's job. In development add the usual
+> `static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)` to your own
+> `urls.py`.
+
+### 4. Include the URLs
+
+```python
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("blog/", include("kioblog.urls")),
+]
+```
+
+### 5. Configure the admin editor
+
+**This step is easy to miss and fails silently.** kioblog mounts markdownx
+under its own prefix (it cannot know where you will mount it), but markdownx's
+JavaScript always posts to a site-absolute path. If these do not match your
+prefix, the live preview and image drag-and-drop 404 in the browser console
+while everything else looks fine.
+
+Using `blog/` from step 4:
+
+```python
+MARKDOWNX_URLS_PATH = "/blog/markdownx/markdownify/"
+MARKDOWNX_UPLOAD_URLS_PATH = "/blog/markdownx/upload/"
+
+# Optional but recommended: makes the admin preview render exactly like the
+# public page, code blocks and all.
+MARKDOWNX_MARKDOWNIFY_FUNCTION = "kioblog.markdown.render.render_markdown"
+```
+
+Both endpoints require a logged-in staff user.
+
+### 6. Migrate
+
+```bash
+python manage.py migrate
+```
+
+Then create posts from the Django admin.
+
+## Site-wide settings
+
+The `Meta` model holds arbitrary key/value settings, editable in the admin and
+available in every template as `kioblog_settings`. The bundled templates use:
+
+| Key | Used for |
+| --- | --- |
+| `blog_title` | `<title>` fallback |
+| `meta_title` | `<meta name="title">` fallback |
+| `meta_description` | `<meta name="description">` fallback |
+| `social_twitter`, `social_facebook`, `social_instagram`, `social_youtube`, `social_twitch` | Sidebar links |
+
+## URLs
+
+Mounted relative to your prefix:
+
+| Route | Name | Page |
+| --- | --- | --- |
+| `/` | `kioblog-home` | Post list |
+| `/page/<n>` | `kioblog-page` | Post list, paginated (5 per page) |
+| `/category/<slug>` | `kioblog-category` | Category archive |
+| `/category/<slug>/page/<n>/` | `kioblog-category-page` | Category archive, paginated |
+| `/tag/<slug>/` | `kioblog-tag` | Tag archive |
+| `/tag/<slug>/page/<n>/` | `kioblog-tag-page` | Tag archive, paginated |
+| `/search/?q=` | `kioblog-search` | Search over title, excerpt and content |
+| `/<slug>/` | `kioblog-post` | Single post |
+| `/robots.txt`, `/sitemap.xml` | | SEO |
+
+## Writing posts
+
+Post content is Markdown. Fenced code blocks take an info-string of
+`language` or `language:filename`:
+
+````markdown
+```python:accounts/views.py
+def index(request):
+    return render(request, "index.html")
+```
+````
+
+## Re-skinning
+
+### Templates
+
+Override any of these by creating a file at the same path in your own
+templates directory:
+
+```
+kioblog/base.html
+kioblog/home.html          # post list, also used for category and tag archives
+kioblog/post.html
+kioblog/search.html
+kioblog/includes/header.html
+kioblog/includes/sidebar.html
+kioblog/includes/footer.html
+```
+
+Useful things on `Post` when writing your own:
+
+| | |
+| --- | --- |
+| `post.content_html` | Rendered Markdown — use with `\|safe` |
+| `post.toc` | Table of contents built from the `<h2>` headings |
+| `post.display_excerpt` | The excerpt, falling back to the first rendered paragraph |
+| `post.reading_time` | Estimated minutes |
+| `post.tags.all` | Tags |
+| `post.get_previous`, `post.get_next`, `post.related_posts` | Navigation |
+
+Context available: `posts`, `page_range` and `recent_posts` everywhere;
+plus `category` and `featured_post` on the list, `tag` on tag archives,
+`query`/`count` on search, and `prev_post`/`next_post`/`related_posts` on a
+post.
+
+### Code blocks
+
+kioblog emits this structure and **the class names are a stable contract** —
+style them, don't expect them to change:
+
+```html
+<figure class="code-block" data-lang="python">
+  <div class="code-block__bar">
+    <span class="code-block__dots"><i></i><i></i><i></i></span>
+    <span class="code-block__file">accounts/views.py</span>
+    <span class="code-block__lang">python</span>
+    <button class="code-block__copy" type="button">Copy</button>
+  </div>
+  <div class="code-block__body">
+    <pre class="code-block__gutter" aria-hidden="true">1
+2</pre>
+    <div class="highlight"><pre><code>…highlighted tokens…</code></pre></div>
+  </div>
+</figure>
+```
+
+`code-block__file` is omitted when the fence has no filename. The line-number
+gutter is a separate element so that selecting the code does not pick up the
+numbers.
+
+kioblog ships token colours only, as a One Dark Pygments stylesheet:
+
+```html
+<link href="{% static 'kioblog/code.css' %}" rel="stylesheet">
+```
+
+Everything around the code — the bar, the traffic-light dots, the copy button —
+is unstyled and yours to design. Swap `code.css` for your own `.highlight`
+rules if you want a different palette. The copy button carries no JavaScript
+either; wire it up how you like.
+
+## Licence
+
+MIT — see [LICENSE.txt](LICENSE.txt).
