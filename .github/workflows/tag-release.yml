@@ -1,15 +1,42 @@
 name: Tag release
 
-# Creates the release tag from whatever version setup.py currently declares on
-# main. Manual on purpose: merging to main and deciding "this is a release" are
-# separate calls, so several PRs can land before a version is cut.
+# Cuts the release tag. Manual on purpose: merging to main and deciding "this
+# is a release" are separate calls, so several PRs can land before a version is
+# cut.
+#
+# You pick which part of the version moves; the workflow reads the highest
+# existing release tag and does the arithmetic. Nothing is typed by hand, so
+# there is no version to mistype and none stored in the code - setuptools_scm
+# reads the tag at build time, which makes the tag the single source of truth.
 #
 # This does NOT publish. Tags pushed with GITHUB_TOKEN deliberately do not start
 # other workflows ("Events triggered by the GITHUB_TOKEN will not create a new
 # workflow run"), so publishing stays a second, explicit action: run the
 # "Publish to PyPI" workflow and give it the tag this one printed.
+#
+# As in publish.yml, `${{ ... }}` never appears inside a `run:` block - Actions
+# interpolates those textually before the shell sees them. Values arrive via
+# `env:` and are used as quoted shell variables.
 on:
   workflow_dispatch:
+    inputs:
+      bump:
+        description: "Which part of the version to increment"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+# The version maths is read-modify-write against the tag list, so two runs
+# started before either pushes would both see the same tags and compute
+# different next versions - each passing its own existence check, since neither
+# tag exists yet. cancel-in-progress is false on purpose: the second run must
+# wait and then re-read the tags, not be discarded.
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
 
 jobs:
   tag:
@@ -21,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history so existing tags are visible to the duplicate check.
+          # Full history so every existing tag is visible to the version maths.
           fetch-depth: 0
 
       # Releases come off main. Dispatching this against a feature branch would
@@ -33,100 +60,117 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      # `packaging` is what setuptools uses to normalise versions when naming
-      # distributions, so asking it directly beats approximating PEP 440 with a
-      # regex here.
-      - name: Install packaging
-        run: python -m pip install --quiet packaging
-
-      # setup.py holds the version in two places that must agree (version and
-      # the tag embedded in download_url). Catching a mismatch here is far
-      # cheaper than noticing after the tag is public.
-      - name: Read and check the version in setup.py
-        id: version
+      # Two separate things have to be true before tagging, and neither is
+      # implied by the checkout:
+      #
+      #  - The commit being tagged is the current tip of main. Asked of the
+      #    remote directly rather than inferred from what was checked out: with
+      #    concurrency, a run can sit queued while main advances, and reasoning
+      #    about which SHA actions/checkout resolved is exactly the kind of
+      #    subtlety that should not be load-bearing here.
+      #  - It is also the commit this run was dispatched for. github.sha is
+      #    pinned at dispatch time, so this is what makes the operation
+      #    predictable: you tag the commit you were looking at, not whatever
+      #    landed while the run waited.
+      #
+      # A window still exists between this check and the push - that is
+      # unavoidable without an atomic compare-and-swap - but it shrinks from the
+      # length of the queue wait to the length of the tagging step.
+      - name: Refuse unless HEAD is both the tip of main and the dispatched commit
+        env:
+          DISPATCHED_SHA: ${{ github.sha }}
         run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import os, re, sys, pathlib
+          if ! git fetch --quiet origin main; then
+            echo "::error::Could not read origin/main; refusing to tag against a possibly stale view."
+            exit 1
+          fi
+          REMOTE_SHA="$(git rev-parse FETCH_HEAD)"
+          HEAD_SHA="$(git rev-parse HEAD)"
 
-          src = pathlib.Path("setup.py").read_text(encoding="utf-8")
+          if [ "${HEAD_SHA}" != "${REMOTE_SHA}" ]; then
+            echo "::error::HEAD (${HEAD_SHA}) is not the tip of origin/main (${REMOTE_SHA})."
+            echo "main moved while this run was queued. Re-run the workflow."
+            exit 1
+          fi
 
-          def find(pattern, label):
-              m = re.search(pattern, src)
-              if not m:
-                  print(f"::error::Could not find {label} in setup.py", file=sys.stderr)
+          if [ "${HEAD_SHA}" != "${DISPATCHED_SHA}" ]; then
+            echo "::error::main has moved since this run was dispatched (was ${DISPATCHED_SHA}, now ${HEAD_SHA})."
+            echo "Re-run the workflow so you tag the commit you intend to release."
+            exit 1
+          fi
+
+          echo "HEAD, origin/main and the dispatched commit all agree at ${HEAD_SHA}"
+
+      - name: Work out the next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import re
+          import subprocess
+          import sys
+
+          # Only canonical vX.Y.Z tags count. This repo also carries older
+          # v0.1-alpha style tags, and letting those into the comparison would
+          # make the arithmetic meaningless.
+          TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+
+          def git(*args):
+              return subprocess.run(
+                  ["git", *args], capture_output=True, text=True, check=True
+              ).stdout.strip()
+
+          releases = []
+          for tag in git("tag", "--list", "v*").split():
+              m = TAG_RE.match(tag)
+              if m:
+                  releases.append((tuple(int(p) for p in m.groups()), tag))
+
+          # Refuse to tag a commit that is already a release. Without this,
+          # running this workflow twice with no commits in between would put two
+          # different version numbers on the same code.
+          head = git("rev-parse", "HEAD")
+          for _, tag in releases:
+              if git("rev-list", "-n", "1", tag) == head:
+                  print(
+                      f"::error::HEAD is already released as {tag}. "
+                      f"Merge something before cutting another version.",
+                      file=sys.stderr,
+                  )
                   raise SystemExit(1)
-              return m.group(1)
 
-          version = find(r'version\s*=\s*["\']([^"\']+)["\']', "version")
-          download_url = find(r'download_url\s*=\s*["\']([^"\']+)["\']', "download_url")
+          if releases:
+              (major, minor, patch), latest = max(releases)
+          else:
+              # First release in a repo with no vX.Y.Z tags yet.
+              major = minor = patch = 0
+              latest = "(none)"
 
-          # The tag has to match the filename setuptools will build, and
-          # setuptools names distributions from the *normalised* version. A
-          # value like 0.3.0rc or 01.2.3 is legal here but becomes 0.3.0rc0 or
-          # 1.2.3 in the artifact, so tagging it verbatim would produce a public
-          # tag that publish.yml can never match. Require the canonical form.
-          from packaging.version import InvalidVersion, Version
-
-          try:
-              parsed = Version(version)
-          except InvalidVersion:
-              print(f"::error::Version {version!r} is not a valid PEP 440 version", file=sys.stderr)
+          bump = os.environ["BUMP"]
+          if bump == "major":
+              major, minor, patch = major + 1, 0, 0
+          elif bump == "minor":
+              minor, patch = minor + 1, 0
+          elif bump == "patch":
+              patch += 1
+          else:
+              print(f"::error::Unknown bump {bump!r}", file=sys.stderr)
               raise SystemExit(1)
 
-          if str(parsed) != version:
-              print(
-                  f"::error::setup.py declares {version!r}, which packaging normalises to "
-                  f"{str(parsed)!r}. Use the canonical form so the tag matches the built filename.",
-                  file=sys.stderr,
-              )
-              raise SystemExit(1)
-
-          if parsed.local or parsed.is_devrelease:
-              print(f"::error::{version!r} is a dev/local version and can't be released", file=sys.stderr)
-              raise SystemExit(1)
-
-          # Pull the tag out of the archive URL and compare it whole. A substring
-          # test would accept .../tags/v0.3.0.backup.tar.gz for version 0.3.0,
-          # since "/v0.3.0." occurs inside it - the metadata would then point at
-          # a different, possibly nonexistent tag while the guard reported
-          # everything in sync.
-          url_match = re.search(r"/tags/(?P<tag>[^/]+)\.tar\.gz$", download_url)
-          if not url_match:
-              print(
-                  f"::error::download_url {download_url!r} isn't a GitHub archive URL of the form "
-                  f".../tags/<tag>.tar.gz, so the tag it refers to can't be checked.",
-                  file=sys.stderr,
-              )
-              raise SystemExit(1)
-
-          url_tag = url_match.group("tag")
-          if url_tag != f"v{version}":
-              print(
-                  f"::error::setup.py is inconsistent: version is {version} (tag v{version}) "
-                  f"but download_url refers to tag {url_tag}. Update both before tagging.",
-                  file=sys.stderr,
-              )
-              raise SystemExit(1)
-
-          print(f"version={version}")
-          print(f"tag=v{version}")
+          new_tag = f"v{major}.{minor}.{patch}"
+          print(f"latest={latest}")
+          print(f"tag={new_tag}")
           PY
 
-      # As in publish.yml, values reach the shell through env: rather than
-      # `${{ }}` interpolation. The version is regex-checked above so it can't
-      # carry shell metacharacters, but keeping the rule unconditional means
-      # there's no judgement call to get wrong later.
       - name: Refuse if the tag already exists
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-            echo "::error::${TAG} already exists. Bump the version in setup.py first."
-            echo "Existing tags:"
+            echo "::error::${TAG} already exists, so the version maths picked a taken number."
+            echo "Existing release tags:"
             git tag -l 'v*' | sort -V | tail -5
             exit 1
           fi
@@ -144,11 +188,17 @@ jobs:
       - name: Summary
         env:
           TAG: ${{ steps.version.outputs.tag }}
+          PREVIOUS: ${{ steps.version.outputs.latest }}
+          BUMP: ${{ inputs.bump }}
         run: |
           {
             echo "### Tagged \`${TAG}\`"
             echo
-            echo "Commit: \`$(git rev-parse --short HEAD)\`"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Previous release | \`${PREVIOUS}\` |"
+            echo "| Bump | ${BUMP} |"
+            echo "| Commit | \`$(git rev-parse --short HEAD)\` |"
             echo
             echo "Nothing has been published yet. To release it, run the"
             echo "**Publish to PyPI** workflow and enter \`${TAG}\` as the tag."

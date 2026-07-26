@@ -1,19 +1,27 @@
-from distutils.core import setup
+from setuptools import find_packages, setup
 
-from setuptools import find_packages
-
+# No `version=` here on purpose. setuptools_scm derives it from the latest git
+# tag at build time (see pyproject.toml), so the tag is the single source of
+# truth and there is nothing to keep in sync by hand.
+#
+# Consequence worth knowing: a build needs the tags present. A shallow clone
+# without them produces a 0.1.devN+g<sha> placeholder rather than the real
+# version, which is why every workflow that builds checks out with
+# fetch-depth: 0.
+#
+# `download_url` is gone with it - it embedded the version a second time, and
+# pointing at a GitHub archive is a pre-PyPI-hosting convention that no
+# installer has needed for years.
 setup(
     name="kioblog",
     packages=find_packages(exclude=("kioblogdev", "media"), include="./kioblog/templates/*"),
     package_data={"templates": ["kioblog/templates/*"]},
     include_package_data=True,
-    version="0.2.2",
     license="MIT",
     description="Simple blog for Django",
     author="Eric Bujeque",
     author_email="noikzyr3@gmail.com",
     url="https://github.com/Eric-Bujeque/kioblog",
-    download_url="https://github.com/Eric-Bujeque/kioblog/archive/refs/tags/v0.2.2.tar.gz",
     keywords=["blog", "django"],
     install_requires=["Django>=3.0", "django-robots>=4.0", "Markdown>=3.3", "Pygments>=2.10", "django-markdownx>=4.0"],
     # 3.8 is the real floor: the package uses f-strings (3.6+) and its

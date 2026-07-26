@@ -8,6 +8,12 @@
 # eol=lf makes that hook a genuine no-op instead.
 * text=auto eol=lf
 
+# Lets `git archive` substitute the $Format:...$ placeholders in
+# .git_archival.txt. Without this, a GitHub-generated source archive of a tag
+# carries neither .git nor PKG-INFO, and setuptools_scm has no way at all to
+# work out the version - installing from such an archive dies with LookupError.
+.git_archival.txt export-subst
+
 # Never munge binaries. text=auto detects most of these anyway; listing the
 # ones a blog package is likely to grow makes it explicit.
 *.png binary
