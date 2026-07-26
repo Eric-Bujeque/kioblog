@@ -60,26 +60,46 @@ jobs:
             exit 1
           fi
 
-      # actions/checkout fetches with an unpinned refspec
-      # (+refs/heads/*:refs/remotes/origin/*) and checks out origin/main as of
-      # job start - not the SHA main had when the run was dispatched. Normally
-      # identical, but a run can now sit in the concurrency queue while main
-      # moves, and would then silently tag a commit nobody asked for.
+      # Two separate things have to be true before tagging, and neither is
+      # implied by the checkout:
       #
-      # github.sha is pinned to dispatch time, so comparing the two makes the
-      # operation deterministic: you tag exactly the commit you saw, or the run
-      # stops and tells you to look again.
-      - name: Refuse if main moved since this run was dispatched
+      #  - The commit being tagged is the current tip of main. Asked of the
+      #    remote directly rather than inferred from what was checked out: with
+      #    concurrency, a run can sit queued while main advances, and reasoning
+      #    about which SHA actions/checkout resolved is exactly the kind of
+      #    subtlety that should not be load-bearing here.
+      #  - It is also the commit this run was dispatched for. github.sha is
+      #    pinned at dispatch time, so this is what makes the operation
+      #    predictable: you tag the commit you were looking at, not whatever
+      #    landed while the run waited.
+      #
+      # A window still exists between this check and the push - that is
+      # unavoidable without an atomic compare-and-swap - but it shrinks from the
+      # length of the queue wait to the length of the tagging step.
+      - name: Refuse unless HEAD is both the tip of main and the dispatched commit
         env:
           DISPATCHED_SHA: ${{ github.sha }}
         run: |
+          if ! git fetch --quiet origin main; then
+            echo "::error::Could not read origin/main; refusing to tag against a possibly stale view."
+            exit 1
+          fi
+          REMOTE_SHA="$(git rev-parse FETCH_HEAD)"
           HEAD_SHA="$(git rev-parse HEAD)"
+
+          if [ "${HEAD_SHA}" != "${REMOTE_SHA}" ]; then
+            echo "::error::HEAD (${HEAD_SHA}) is not the tip of origin/main (${REMOTE_SHA})."
+            echo "main moved while this run was queued. Re-run the workflow."
+            exit 1
+          fi
+
           if [ "${HEAD_SHA}" != "${DISPATCHED_SHA}" ]; then
             echo "::error::main has moved since this run was dispatched (was ${DISPATCHED_SHA}, now ${HEAD_SHA})."
             echo "Re-run the workflow so you tag the commit you intend to release."
             exit 1
           fi
-          echo "main is still at ${HEAD_SHA}"
+
+          echo "HEAD, origin/main and the dispatched commit all agree at ${HEAD_SHA}"
 
       - name: Work out the next version
         id: version
