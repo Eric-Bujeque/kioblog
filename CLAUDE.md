@@ -56,9 +56,18 @@ Templates live in `kioblog/templates/kioblog/` and static in `kioblog/static/kio
 
 Version is hardcoded in **three places that must stay in sync**: `version` and `download_url` (the git tag) in [setup.py](setup.py), and the git tag itself.
 
-Publishing is automated: pushing a `v*` tag triggers [.github/workflows/publish.yml](.github/workflows/publish.yml), which builds, **verifies the tag matches the version built from setup.py** (so tagging `v0.2.3` while setup.py still says `0.2.2` fails loudly instead of re-publishing the old version), runs `twine check`, and uploads via **PyPI Trusted Publishing (OIDC)** — there is no API token stored in the repo. The upload runs in the `pypi` GitHub environment, so adding required reviewers there gates releases behind a manual approval.
+A release is four deliberate steps, and **the last two are manual triggers in the Actions tab, not something that happens on merge**:
 
-So a release is: bump both spots in `setup.py` → merge → tag `vX.Y.Z` → push the tag.
+1. Bump `version` **and** `download_url` in `setup.py`, via a PR like any other change.
+2. Merge to `main`.
+3. Run **Tag release** ([tag-release.yml](.github/workflows/tag-release.yml)). It reads the version straight out of `setup.py` on `main` — there is nothing to type, so the tag can't disagree with the code. It refuses to run off any branch but `main`, refuses if `version` and `download_url` disagree, and refuses if the tag already exists.
+4. Run **Publish to PyPI** ([publish.yml](.github/workflows/publish.yml)) and give it that tag.
+
+Publishing never happens on its own. There is no `push: tags` trigger, deliberately: a tag pushed by step 3 wouldn't fire it anyway (GitHub does not start workflow runs for pushes made with `GITHUB_TOKEN`), so a tag pushed from a terminal behaving differently from one made by the workflow would be a trap. One manual trigger keeps the rule simple.
+
+The publish run is `check-tag` → `validate` → `build` → `publish` → `release`. It re-runs the **whole** CI suite against the tagged commit (that's what `validate.yml`'s `ref` input is for — otherwise it would validate whatever branch the run was started from), verifies the tag matches the version actually built, uploads via **PyPI Trusted Publishing (OIDC)** with no stored API token, and finally opens a **GitHub release** with auto-generated notes and the sdist/wheel attached. The upload sits in the `pypi` GitHub environment, so adding required reviewers there gates it behind a manual approval.
+
+Permissions are split per job on purpose: the OIDC upload holds only `id-token: write`, and only the release job gets `contents: write`.
 
 `requirements.txt` pins the dev project's deps; `install_requires` in setup.py declares the looser runtime floors (`Django>=3.0`, `Markdown`, `Pygments`, `django-markdownx`). When adding a static asset used by the render pipeline (e.g. a regenerated `code.css`), confirm it is committed — it ships via MANIFEST.in, and the CI `package` job checks that.
 

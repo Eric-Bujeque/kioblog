@@ -6,6 +6,16 @@ name: Validate
 # the release path and the PR path can't drift apart.
 on:
   workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Commit-ish to check out. Publishing passes the release tag so the
+          tagged commit is what gets validated, not the ref the run was
+          started from. Empty (the default) means "whatever triggered the run",
+          which is what ci.yml wants.
+        required: false
+        type: string
+        default: ""
 
 jobs:
   lint:
@@ -13,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -27,6 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       # Pinned to 3.10: requirements.txt pins Django 3.2, which supports up to
       # Python 3.10. Raising this means bumping Django first.
@@ -61,6 +75,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-python@v5
         with:

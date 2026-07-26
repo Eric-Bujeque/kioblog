@@ -1,31 +1,119 @@
 name: Publish to PyPI
 
-# Publishing is driven by tags, matching how releases have been cut so far
-# (v0.2.0, v0.2.1, ...). Pushing a v* tag validates, builds and uploads.
+# Manual on purpose. Cutting a tag and shipping it to PyPI are separate
+# decisions, so this never fires on its own - you run it from the Actions tab
+# and name the tag to publish.
 #
-# Tag push is the only trigger on purpose. workflow_dispatch would run against
-# whatever ref is picked in the Actions UI - on a branch that is not a tag, the
-# tag/version guard below has nothing to compare against, and an untagged build
-# could reach PyPI. To retry a failed release, use "Re-run jobs" on the original
-# run: that replays it against the same tag.
+# There is deliberately no `push: tags` trigger. With one, a tag pushed from a
+# terminal would publish immediately while a tag created by the "Tag release"
+# workflow would not (GITHUB_TOKEN pushes don't start workflow runs) - the same
+# action having two different outcomes depending on where it came from. One
+# manual trigger keeps the rule simple: nothing reaches PyPI unless you ask.
+#
+# Two rules hold throughout, both learned the hard way in review:
+#
+#  1. `${{ ... }}` never appears inside a `run:` block. Actions interpolates
+#     those textually before the shell sees them, and git happily accepts tag
+#     names containing $(), backticks or `;` - so a crafted tag would execute
+#     as code. Values come in through `env:` and are used as quoted shell
+#     variables instead.
+#  2. Everything after check-tag works from the commit SHA that job resolved,
+#     never from the tag name. Tags are mutable; re-resolving the name in each
+#     job would let a force-update between validation and build ship a commit
+#     that was never validated.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, e.g. v0.2.3 (create it first with 'Tag release')"
+        required: true
+        type: string
 
 jobs:
-  # Same checks as CI - tests, lint, generated-CSS drift and wheel contents.
-  # Tag pushes don't trigger ci.yml, so without this a release could be cut
-  # from a commit that never passed anything but `twine check`.
+  # Fail fast with a readable message if the tag is missing or malformed, and
+  # pin the rest of the run to the commit it points at right now.
+  check-tag:
+    name: Check tag
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the tag to a commit
+        id: resolve
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          case "${TAG}" in
+            v*) ;;
+            *)
+              echo "::error::Tag must start with 'v' (got '${TAG}')."
+              exit 1
+              ;;
+          esac
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Tag '${TAG}' does not exist. Create it with the 'Tag release' workflow first."
+            echo "Most recent tags:"
+            git tag -l 'v*' | sort -V | tail -5
+            exit 1
+          fi
+          # ^{commit} peels annotated tags and, crucially, fails for a tag that
+          # targets a tree or a blob - which git permits. `git rev-list -n 1` is
+          # not enough here: on such a tag it exits 0 and prints nothing, and an
+          # empty ref makes actions/checkout silently fall back to the ref this
+          # run was dispatched from.
+          SHA="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" || true)"
+          if [ -z "${SHA}" ]; then
+            echo "::error::Tag '${TAG}' does not point at a commit; refusing to publish it."
+            exit 1
+          fi
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "${TAG} -> ${SHA}"
+
+  # Full CI against the resolved commit, not against whatever ref this run was
+  # started from - that's what validate.yml's `ref` input is for.
   validate:
+    needs: check-tag
     uses: ./.github/workflows/validate.yml
+    with:
+      ref: ${{ needs.check-tag.outputs.sha }}
 
   build:
     name: Build and verify
-    needs: validate
+    needs: [check-tag, validate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-tag.outputs.sha }}
+          fetch-depth: 0
+
+      # Validation has just finished on this SHA. If the tag was force-updated
+      # in the meantime, publishing it now would ship an unvalidated commit.
+      - name: Re-check the tag still points at the validated commit
+        env:
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ needs.check-tag.outputs.sha }}
+        run: |
+          # Compare against the remote, not the snapshot this job checked out:
+          # a force-update or delete landing after checkout leaves the local ref
+          # stale and the comparison would pass on out-of-date data.
+          #
+          # This must fail closed. Swallowing a network or auth error here would
+          # silently fall back to that stale local ref - exactly the state the
+          # fetch exists to rule out.
+          if ! git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1; then
+            echo "::error::Could not refresh tags from origin; refusing to compare against a possibly stale local ref."
+            exit 1
+          fi
+          CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
+          if [ "${CURRENT}" != "${SHA}" ]; then
+            echo "::error::${TAG} moved during validation (was ${SHA}, now ${CURRENT:-missing}). Refusing to publish."
+            exit 1
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -39,28 +127,22 @@ jobs:
       - name: Build distributions
         run: python -m build
 
-      # setup.py's version is hand-maintained, so a tag can easily disagree
-      # with it (tagging v0.2.3 while setup.py still says 0.2.2 would publish
-      # 0.2.2 again and fail on PyPI as a duplicate). The built filename is
-      # the source of truth here. Unconditional: if this ever runs on a ref
-      # that isn't a v* tag, that's a bug and it should stop, not skip.
+      # setup.py's version is hand-maintained, so the tag can disagree with it
+      # (tagging v0.2.3 while setup.py still says 0.2.2 would rebuild 0.2.2 and
+      # fail at upload as a duplicate). The built filename is the source of
+      # truth.
       - name: Verify tag matches the built version
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          case "${GITHUB_REF}" in
-            refs/tags/v*) ;;
-            *)
-              echo "::error::Refusing to publish from ${GITHUB_REF}; releases must come from a v* tag."
-              exit 1
-              ;;
-          esac
-          TAG="${GITHUB_REF_NAME#v}"
-          if [ ! -f "dist/kioblog-${TAG}.tar.gz" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match the version built from setup.py."
+          VERSION="${TAG#v}"
+          if [ ! -f "dist/kioblog-${VERSION}.tar.gz" ]; then
+            echo "::error::Tag ${TAG} does not match the version built from setup.py at that commit."
             echo "Built artifacts:"
             ls -1 dist/
             exit 1
           fi
-          echo "Tag ${GITHUB_REF_NAME} matches dist/kioblog-${TAG}.tar.gz"
+          echo "${TAG} matches dist/kioblog-${VERSION}.tar.gz"
 
       - name: Check distribution metadata
         run: twine check dist/*
@@ -72,7 +154,7 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [check-tag, build]
     runs-on: ubuntu-latest
     # Add required reviewers to this environment in the repo settings if you
     # want a manual approval gate before anything reaches PyPI.
@@ -80,6 +162,10 @@ jobs:
       name: pypi
       url: https://pypi.org/project/kioblog/
     permissions:
+      # Naming any permission sets every unnamed one to `none`, so contents has
+      # to be listed explicitly: this job checks out and fetches from origin,
+      # and would fail outright without read access.
+      contents: read
       # Required for PyPI Trusted Publishing (OIDC). No API token is stored
       # anywhere: PyPI verifies this workflow's short-lived identity instead.
       # To use an API token instead, drop this block and pass
@@ -87,9 +173,96 @@ jobs:
       # to the publish step below.
       id-token: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-tag.outputs.sha }}
+          fetch-depth: 0
+
+      # Last gate before the one irreversible step in this workflow. build
+      # checked the tag too, but this job can sit for a long time waiting on
+      # `pypi` environment approval, and the tag can move in that window.
+      # Checking after approval means a race aborts *before* the upload rather
+      # than being noticed by the release job afterwards - by which point the
+      # version is on PyPI for good, pointing at a tag that has moved on.
+      - name: Re-check the tag immediately before uploading
+        env:
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ needs.check-tag.outputs.sha }}
+        run: |
+          # Compare against the remote, not the snapshot this job checked out:
+          # a force-update or delete landing after checkout leaves the local ref
+          # stale and the comparison would pass on out-of-date data.
+          #
+          # This must fail closed. Swallowing a network or auth error here would
+          # silently fall back to that stale local ref - exactly the state the
+          # fetch exists to rule out.
+          if ! git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1; then
+            echo "::error::Could not refresh tags from origin; refusing to compare against a possibly stale local ref."
+            exit 1
+          fi
+          CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
+          if [ "${CURRENT}" != "${SHA}" ]; then
+            echo "::error::${TAG} moved before upload (was ${SHA}, now ${CURRENT:-missing}). Nothing published."
+            exit 1
+          fi
+          echo "${TAG} still at ${SHA}; proceeding with upload."
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release:
+    name: Create GitHub release
+    # Runs after PyPI so the release records what actually shipped. Kept as its
+    # own job so the OIDC upload above keeps its narrow id-token permission and
+    # never also holds contents: write.
+    needs: [check-tag, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-tag.outputs.sha }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # Idempotent: re-running a partly failed release tops up an existing
+      # GitHub release instead of erroring out on "already exists".
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ needs.check-tag.outputs.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Compare against the remote, not the snapshot this job checked out:
+          # a force-update or delete landing after checkout leaves the local ref
+          # stale and the comparison would pass on out-of-date data.
+          #
+          # This must fail closed. Swallowing a network or auth error here would
+          # silently fall back to that stale local ref - exactly the state the
+          # fetch exists to rule out.
+          if ! git fetch --prune --prune-tags --force --tags origin >/dev/null 2>&1; then
+            echo "::error::Could not refresh tags from origin; refusing to compare against a possibly stale local ref."
+            exit 1
+          fi
+          CURRENT="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
+          if [ "${CURRENT}" != "${SHA}" ]; then
+            echo "::error::${TAG} no longer points at the published commit ${SHA} (now ${CURRENT:-missing})."
+            exit 1
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; refreshing its assets."
+            gh release upload "${TAG}" dist/* --clobber
+          else
+            gh release create "${TAG}" dist/* --verify-tag --generate-notes
+          fi
+          echo "https://github.com/${REPO}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"

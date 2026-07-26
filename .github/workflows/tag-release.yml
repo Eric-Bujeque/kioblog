@@ -1,0 +1,155 @@
+name: Tag release
+
+# Creates the release tag from whatever version setup.py currently declares on
+# main. Manual on purpose: merging to main and deciding "this is a release" are
+# separate calls, so several PRs can land before a version is cut.
+#
+# This does NOT publish. Tags pushed with GITHUB_TOKEN deliberately do not start
+# other workflows ("Events triggered by the GITHUB_TOKEN will not create a new
+# workflow run"), so publishing stays a second, explicit action: run the
+# "Publish to PyPI" workflow and give it the tag this one printed.
+on:
+  workflow_dispatch:
+
+jobs:
+  tag:
+    name: Create and push tag
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to push the tag back to the repository.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so existing tags are visible to the duplicate check.
+          fetch-depth: 0
+
+      # Releases come off main. Dispatching this against a feature branch would
+      # tag a commit that never went through review.
+      - name: Refuse to tag anything but main
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Releases are cut from main; this run targeted ${GITHUB_REF}."
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # `packaging` is what setuptools uses to normalise versions when naming
+      # distributions, so asking it directly beats approximating PEP 440 with a
+      # regex here.
+      - name: Install packaging
+        run: python -m pip install --quiet packaging
+
+      # setup.py holds the version in two places that must agree (version and
+      # the tag embedded in download_url). Catching a mismatch here is far
+      # cheaper than noticing after the tag is public.
+      - name: Read and check the version in setup.py
+        id: version
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, re, sys, pathlib
+
+          src = pathlib.Path("setup.py").read_text(encoding="utf-8")
+
+          def find(pattern, label):
+              m = re.search(pattern, src)
+              if not m:
+                  print(f"::error::Could not find {label} in setup.py", file=sys.stderr)
+                  raise SystemExit(1)
+              return m.group(1)
+
+          version = find(r'version\s*=\s*["\']([^"\']+)["\']', "version")
+          download_url = find(r'download_url\s*=\s*["\']([^"\']+)["\']', "download_url")
+
+          # The tag has to match the filename setuptools will build, and
+          # setuptools names distributions from the *normalised* version. A
+          # value like 0.3.0rc or 01.2.3 is legal here but becomes 0.3.0rc0 or
+          # 1.2.3 in the artifact, so tagging it verbatim would produce a public
+          # tag that publish.yml can never match. Require the canonical form.
+          from packaging.version import InvalidVersion, Version
+
+          try:
+              parsed = Version(version)
+          except InvalidVersion:
+              print(f"::error::Version {version!r} is not a valid PEP 440 version", file=sys.stderr)
+              raise SystemExit(1)
+
+          if str(parsed) != version:
+              print(
+                  f"::error::setup.py declares {version!r}, which packaging normalises to "
+                  f"{str(parsed)!r}. Use the canonical form so the tag matches the built filename.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          if parsed.local or parsed.is_devrelease:
+              print(f"::error::{version!r} is a dev/local version and can't be released", file=sys.stderr)
+              raise SystemExit(1)
+
+          # Pull the tag out of the archive URL and compare it whole. A substring
+          # test would accept .../tags/v0.3.0.backup.tar.gz for version 0.3.0,
+          # since "/v0.3.0." occurs inside it - the metadata would then point at
+          # a different, possibly nonexistent tag while the guard reported
+          # everything in sync.
+          url_match = re.search(r"/tags/(?P<tag>[^/]+)\.tar\.gz$", download_url)
+          if not url_match:
+              print(
+                  f"::error::download_url {download_url!r} isn't a GitHub archive URL of the form "
+                  f".../tags/<tag>.tar.gz, so the tag it refers to can't be checked.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          url_tag = url_match.group("tag")
+          if url_tag != f"v{version}":
+              print(
+                  f"::error::setup.py is inconsistent: version is {version} (tag v{version}) "
+                  f"but download_url refers to tag {url_tag}. Update both before tagging.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          print(f"version={version}")
+          print(f"tag=v{version}")
+          PY
+
+      # As in publish.yml, values reach the shell through env: rather than
+      # `${{ }}` interpolation. The version is regex-checked above so it can't
+      # carry shell metacharacters, but keeping the rule unconditional means
+      # there's no judgement call to get wrong later.
+      - name: Refuse if the tag already exists
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::${TAG} already exists. Bump the version in setup.py first."
+            echo "Existing tags:"
+            git tag -l 'v*' | sort -V | tail -5
+            exit 1
+          fi
+
+      - name: Create and push the tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "${TAG}"
+          git push origin "${TAG}"
+          echo "Pushed ${TAG} at $(git rev-parse --short HEAD)"
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          {
+            echo "### Tagged \`${TAG}\`"
+            echo
+            echo "Commit: \`$(git rev-parse --short HEAD)\`"
+            echo
+            echo "Nothing has been published yet. To release it, run the"
+            echo "**Publish to PyPI** workflow and enter \`${TAG}\` as the tag."
+          } >> "$GITHUB_STEP_SUMMARY"
