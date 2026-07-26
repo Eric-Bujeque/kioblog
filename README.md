@@ -251,6 +251,7 @@ today and may land elsewhere tomorrow.
 kioblog ships token colours only, as a One Dark Pygments stylesheet:
 
 ```html
+{% load static %}
 <link href="{% static 'kioblog/code.css' %}" rel="stylesheet">
 ```
 
