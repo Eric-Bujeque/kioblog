@@ -9,7 +9,7 @@ blog looks like the rest of your site rather than like a plugin.
 
 - Markdown posts with syntax-highlighted code blocks and a generated table of
   contents
-- Categories, tags, full-text search, reading-time estimates, related posts and
+- Categories, tags, search, reading-time estimates, related posts and
   previous/next navigation
 - Markdown editor in the Django admin with a live preview that renders through
   the same pipeline as the public page
@@ -87,6 +87,9 @@ MEDIA_ROOT = Path(BASE_DIR) / "media"
 ### 4. Include the URLs
 
 ```python
+# A generated urls.py imports only `path`; `include` has to be added.
+from django.urls import include, path
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("blog/", include("kioblog.urls")),
@@ -146,7 +149,7 @@ Mounted relative to your prefix:
 | `/category/<slug>/page/<n>/` | `kioblog-category-page` | Category archive, paginated |
 | `/tag/<slug>/` | `kioblog-tag` | Tag archive |
 | `/tag/<slug>/page/<n>/` | `kioblog-tag-page` | Tag archive, paginated |
-| `/search/?q=` | `kioblog-search` | Search over title, excerpt and content |
+| `/search/?q=` | `kioblog-search` | Case-insensitive substring match on title, excerpt or content — no tokenising, stemming or ranking |
 | `/<slug>/` | `kioblog-post` | Single post |
 | `/robots.txt`, `/sitemap.xml` | | SEO |
 
