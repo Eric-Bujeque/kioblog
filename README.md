@@ -178,12 +178,16 @@ Useful things on `Post` when writing your own:
 
 | | |
 | --- | --- |
-| `post.content_html` | Rendered Markdown — use with `\|safe` |
-| `post.toc` | Table of contents built from the `<h2>` headings |
+| `post.content_html` | Rendered Markdown — **needs `\|safe`** |
+| `post.toc` | Table of contents built from the `<h2>` headings — **needs `\|safe`** |
 | `post.display_excerpt` | The excerpt, falling back to the first rendered paragraph |
 | `post.reading_time` | Estimated minutes |
 | `post.tags.all` | Tags |
 | `post.get_previous`, `post.get_next`, `post.related_posts` | Navigation |
+
+Only the two marked above return HTML. `display_excerpt` is deliberately plain
+text — entities are already decoded, so adding `|safe` to it would render any
+markup the author typed instead of escaping it.
 
 Context varies by template — only `recent_posts` is present everywhere, so
 check this before relying on a variable:
