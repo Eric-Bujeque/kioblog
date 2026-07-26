@@ -29,6 +29,16 @@ on:
         required: true
         type: string
 
+# Same reasoning as tag-release.yml, scoped per tag: two runs publishing the
+# same tag would duplicate the build and race on creating the GitHub release.
+# PyPI would reject the second upload as a duplicate rather than corrupt
+# anything, but there is no reason to get that far. Keyed by tag so unrelated
+# releases can still proceed in parallel, and not cancelled in flight - never
+# interrupt a run that may already have uploaded.
+concurrency:
+  group: publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   # Fail fast with a readable message if the tag is missing or malformed, and
   # pin the rest of the run to the commit it points at right now.

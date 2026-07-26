@@ -29,6 +29,15 @@ on:
           - minor
           - major
 
+# The version maths is read-modify-write against the tag list, so two runs
+# started before either pushes would both see the same tags and compute
+# different next versions - each passing its own existence check, since neither
+# tag exists yet. cancel-in-progress is false on purpose: the second run must
+# wait and then re-read the tags, not be discarded.
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
 jobs:
   tag:
     name: Create and push tag
