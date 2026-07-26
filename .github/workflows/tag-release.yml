@@ -60,6 +60,27 @@ jobs:
             exit 1
           fi
 
+      # actions/checkout fetches with an unpinned refspec
+      # (+refs/heads/*:refs/remotes/origin/*) and checks out origin/main as of
+      # job start - not the SHA main had when the run was dispatched. Normally
+      # identical, but a run can now sit in the concurrency queue while main
+      # moves, and would then silently tag a commit nobody asked for.
+      #
+      # github.sha is pinned to dispatch time, so comparing the two makes the
+      # operation deterministic: you tag exactly the commit you saw, or the run
+      # stops and tells you to look again.
+      - name: Refuse if main moved since this run was dispatched
+        env:
+          DISPATCHED_SHA: ${{ github.sha }}
+        run: |
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "${HEAD_SHA}" != "${DISPATCHED_SHA}" ]; then
+            echo "::error::main has moved since this run was dispatched (was ${DISPATCHED_SHA}, now ${HEAD_SHA})."
+            echo "Re-run the workflow so you tag the commit you intend to release."
+            exit 1
+          fi
+          echo "main is still at ${HEAD_SHA}"
+
       - name: Work out the next version
         id: version
         env:
