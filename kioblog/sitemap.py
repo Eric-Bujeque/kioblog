@@ -46,6 +46,7 @@ class TagSitemap(Sitemap):
 class MainPageSitemap(Sitemap):
     priority = 0.5
     changefreq = "daily"
+    protocol = "https"
 
     def items(self):
         return ["kioblog-home"]
