@@ -93,6 +93,14 @@ class KioblogModels(base.BaseTestCase):
                     title="duplicate", content="x", user=self.user, category=self.category, slug=self.post.slug
                 )
 
+    def test_category_slug_must_be_unique(self) -> None:
+        # Doesn't crash the way a duplicate Post.slug does (HomeView/sitemap
+        # resolve via .filter(slug=...).first()), but a category URL could
+        # silently route to a different category than the one it linked to.
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                models.Category.objects.create(title="duplicate", slug=self.category.slug)
+
     def test_category_post_count_ignores_drafts(self) -> None:
         models.Post.objects.create(
             title="draft", content="x", user=self.user, category=self.category, slug="draft", draft=True
