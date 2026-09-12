@@ -192,14 +192,16 @@ Useful things on `Post` when writing your own:
 | --- | --- |
 | `post.content_html` | Rendered Markdown — **needs `\|safe`** |
 | `post.toc` | Nested table of contents covering every heading — **needs `\|safe`** |
+| `post.json_ld` | `BlogPosting` structured data as a JSON string, inside `<script type="application/ld+json">` — **needs `\|safe`** |
 | `post.display_excerpt` | The excerpt, falling back to the first rendered paragraph |
 | `post.reading_time` | Estimated minutes |
 | `post.tags.all` | Tags |
 | `post.get_previous`, `post.get_next`, `post.related_posts` | Navigation |
 
-Only the two marked above return HTML. `display_excerpt` is deliberately plain
-text — entities are already decoded, so adding `|safe` to it would render any
-markup the author typed instead of escaping it.
+Only the three marked above return HTML (or HTML-embeddable JSON, for
+`json_ld`). `display_excerpt` is deliberately plain text — entities are
+already decoded, so adding `|safe` to it would render any markup the author
+typed instead of escaping it.
 
 Context varies by template — only `recent_posts` is present everywhere, so
 check this before relying on a variable:

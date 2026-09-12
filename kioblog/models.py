@@ -1,12 +1,25 @@
+import json
 import re
 from html import unescape
 
 from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.utils import timezone
 from markdownx.models import MarkdownxField
 
 from kioblog.markdown.render import render_markdown
+
+# Same three characters (and the same escapes) Django's own json_script
+# template filter uses - safe to embed anywhere in HTML, including inside the
+# <script type="application/ld+json"> tag post.html puts Post.json_ld in.
+# Without this, a title or excerpt containing "</script>" would close the
+# tag early; json.dumps alone only escapes for JSON syntax, not for HTML.
+_JSON_LD_HTML_ESCAPES = {
+    ord(">"): "\\u003E",
+    ord("<"): "\\u003C",
+    ord("&"): "\\u0026",
+}
 
 
 class Category(models.Model):
@@ -106,6 +119,23 @@ class Post(models.Model):
             .distinct()
         )
         return qs[:limit]
+
+    @property
+    def json_ld(self):
+        """BlogPosting structured data, ready to embed - see the HTML-escape
+        note above _JSON_LD_HTML_ESCAPES for why this needs `|safe` rather
+        than raw json.dumps output."""
+        data = {
+            "@context": "https://schema.org",
+            "@type": "BlogPosting",
+            "headline": self.title,
+            "description": self.display_excerpt,
+            "datePublished": self.published,
+            "author": {"@type": "Person", "name": self.user.get_full_name() or self.user.username},
+        }
+        if self.image:
+            data["image"] = self.image.url
+        return json.dumps(data, cls=DjangoJSONEncoder).translate(_JSON_LD_HTML_ESCAPES)
 
     @staticmethod
     def get_recent_posts(current_slug=None):

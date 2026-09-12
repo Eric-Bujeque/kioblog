@@ -1,3 +1,5 @@
+import json
+
 from django.utils import timezone
 
 from kioblog import models
@@ -82,6 +84,38 @@ class KioblogModels(base.BaseTestCase):
         related = self.post.related_posts()
         self.assertIn(sibling, related)
         self.assertNotIn(self.post, related)
+
+    def test_json_ld_is_valid_and_matches_the_post(self) -> None:
+        self.post.excerpt = "A summary."
+        data = json.loads(self.post.json_ld)
+        self.assertEqual(data["@type"], "BlogPosting")
+        self.assertEqual(data["headline"], self.post.title)
+        self.assertEqual(data["description"], "A summary.")
+        # DjangoJSONEncoder's datetime format (millisecond precision, "Z" for
+        # UTC) isn't the same string as datetime.isoformat() - compare on the
+        # to-the-second prefix both share rather than assume an exact format.
+        self.assertEqual(data["datePublished"][:19], self.post.published.strftime("%Y-%m-%dT%H:%M:%S"))
+
+    def test_json_ld_falls_back_to_username_without_a_full_name(self) -> None:
+        # BaseTestCase's user has no first/last name - get_full_name() would
+        # otherwise render an empty author.name.
+        data = json.loads(self.post.json_ld)
+        self.assertEqual(data["author"]["name"], self.user.username)
+
+    def test_json_ld_omits_image_when_the_post_has_none(self) -> None:
+        data = json.loads(self.post.json_ld)
+        self.assertNotIn("image", data)
+
+    def test_json_ld_escapes_a_script_close_tag_so_it_cant_break_out(self) -> None:
+        # json.dumps alone would emit a literal "</script>" here, which HTML
+        # parses as the end of the <script> tag post.html embeds this in -
+        # everything after it would render as plain page text, not JSON-LD.
+        self.post.title = "</script><script>alert(1)</script>"
+        raw = self.post.json_ld
+        self.assertNotIn("</script>", raw)
+        # Still valid, and still carries the real title once decoded.
+        data = json.loads(raw)
+        self.assertEqual(data["headline"], self.post.title)
 
     def test_category_post_count_ignores_drafts(self) -> None:
         models.Post.objects.create(

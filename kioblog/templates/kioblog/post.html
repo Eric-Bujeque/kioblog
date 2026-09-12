@@ -7,6 +7,7 @@
 {% block meta_description %}{{ post.meta_description }}{% endblock %}
 
 {% block content %}
+    <script type="application/ld+json">{{ post.json_ld|safe }}</script>
     <div id="content">
         <section class="kioblog-post">
             <h4 class="text-secondary mb0 regular">

@@ -1,3 +1,5 @@
+import json
+import re
 import secrets
 
 from django.contrib.auth.models import User
@@ -49,6 +51,14 @@ class KioblogViews(base.BaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context_data["post"], self.post)
         self.assertIn(self.post.content, response.content.decode())
+
+    def test_post_page_embeds_valid_json_ld(self) -> None:
+        response = self.client.get(reverse("kioblog-post", kwargs={"slug": self.post.slug}))
+        html = response.content.decode()
+        match = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL)
+        self.assertIsNotNone(match, "post page has no application/ld+json script tag")
+        data = json.loads(match.group(1))
+        self.assertEqual(data["headline"], self.post.title)
 
     def test_post_context_has_neighbours_and_related(self) -> None:
         response = self.client.get(reverse("kioblog-post", kwargs={"slug": self.post.slug}))
