@@ -32,7 +32,11 @@ _RENDER_CACHE_TIMEOUT = 60 * 60 * 24 * 30
 
 class Category(models.Model):
     title = models.CharField(max_length=250)
-    slug = models.SlugField(max_length=200)
+    # Unlike Post.slug (see migration 0007), a duplicate here doesn't crash -
+    # HomeView/sitemap.py both resolve it via .filter(slug=...).first(), which
+    # just picks one arbitrarily. Still wrong: the sitemap's URL for a
+    # category can silently route to a *different* one than it linked to.
+    slug = models.SlugField(max_length=200, unique=True)
     featured = models.BooleanField(default=False)
 
     def __str__(self):

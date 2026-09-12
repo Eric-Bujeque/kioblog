@@ -1,21 +1,31 @@
-"""Proves migration 0007 is safe to run against a database that already has
-duplicate Post slugs - the exact situation an existing installation upgrading
-past this migration is in, and the one a plain `AlterField(unique=True)`
-would fail on.
+"""Proves migrations 0007 and 0009 are safe to run against a database that
+already has duplicate Post/Category slugs - the exact situation an existing
+installation upgrading past them is in, and the one a plain
+`AlterField(unique=True)` would fail on.
 
-Builds real duplicate rows against the pre-0007 schema (which has no
+Builds real duplicate rows against the pre-migration schema (which has no
 constraint to stop them), then migrates forward and asserts every row
-survives with a unique slug. This exercises the actual migration, not a
-reimplementation of it - kioblog.slugs.deduplicate_slugs already has a
-narrower unit-style check in test_slugs.py.
+survives with a unique slug. This exercises the actual migrations, not a
+reimplementation of them.
+
+The Category tests below also carry deduplicate_slugs's edge-case coverage
+(an already-taken target slug, truncation to stay within max_length) that
+used to live in a standalone test_slugs.py, unit-testing the helper against
+Category as a convenient fixture - "convenient" specifically because it was
+the one slugged model still unconstrained. Migration 0009 removes that, so
+there is no longer any model the ORM will let collide outside a reversed
+migration state like this one.
 """
 
 import importlib
+from unittest.mock import MagicMock
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import SimpleTestCase, TransactionTestCase, override_settings
 from django.utils import timezone
+
+from kioblog.slugs import deduplicate_slugs
 
 
 class DeduplicatePostSlugsMigrationTests(TransactionTestCase):
@@ -205,3 +215,105 @@ class PostUpdatedBackfillMigrationTests(TransactionTestCase):
         post.save()
         post.refresh_from_db()
         self.assertGreater(post.updated, self.old_published)
+
+
+class DeduplicateCategorySlugsMigrationTests(TransactionTestCase):
+    migrate_from = ("kioblog", "0008_post_updated")
+    migrate_to = ("kioblog", "0009_enforce_unique_category_slugs")
+
+    def setUp(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        Category = old_apps.get_model("kioblog", "Category")
+
+        # Three categories already sharing a slug, plus an unrelated one that
+        # must be left alone - all only possible because 0008 has no
+        # constraint on Category.slug yet.
+        self.first = Category.objects.create(title="A", slug="dup")
+        self.second = Category.objects.create(title="B", slug="dup")
+        self.third = Category.objects.create(title="C", slug="dup")
+        self.unrelated = Category.objects.create(title="D", slug="fine")
+        # "dup" colliding would naturally rename to "dup-2" - except that's
+        # already someone else's real slug. Every model but Category was
+        # already unique by the time this test was written, which is why
+        # this scenario (and the one below) live here rather than as a
+        # lighter unit test - after this migration there is no slugged model
+        # left the ORM will let collide outside a reversed migration state.
+        self.taken = Category.objects.create(title="Taken", slug="dup-2")
+
+        max_length = Category._meta.get_field("slug").max_length
+        long_slug = "x" * max_length
+        self.long_first = Category.objects.create(title="Long A", slug=long_slug)
+        self.long_second = Category.objects.create(title="Long B", slug=long_slug)
+        # "Foo"/"foo": distinct Python strings, so the pre-0009 schema (no
+        # constraint yet) accepts both - but a case-insensitive collation
+        # (MySQL's default, for one) would treat them as the same value for
+        # a unique index. Also moved here from the old test_slugs.py: with
+        # Category constrained too, there's no model left the ORM will let
+        # collide outside a reversed migration state like this one.
+        self.case_first = Category.objects.create(title="Case A", slug="Foo")
+        self.case_second = Category.objects.create(title="Case B", slug="foo")
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate([self.migrate_to])
+        self.new_apps = executor.loader.project_state([self.migrate_to]).apps
+        self.max_length = max_length
+
+    def tearDown(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_collisions_are_renamed_keeping_the_first_by_id(self) -> None:
+        Category = self.new_apps.get_model("kioblog", "Category")
+        self.assertEqual(Category.objects.get(pk=self.first.pk).slug, "dup")
+        self.assertEqual(Category.objects.get(pk=self.second.pk).slug, "dup-3")
+        self.assertEqual(Category.objects.get(pk=self.third.pk).slug, "dup-4")
+
+    def test_never_renames_onto_an_already_taken_slug(self) -> None:
+        Category = self.new_apps.get_model("kioblog", "Category")
+        self.assertEqual(Category.objects.get(pk=self.taken.pk).slug, "dup-2")
+
+    def test_truncates_to_stay_within_max_length(self) -> None:
+        Category = self.new_apps.get_model("kioblog", "Category")
+        self.assertEqual(Category.objects.get(pk=self.long_first.pk).slug, "x" * self.max_length)
+        renamed = Category.objects.get(pk=self.long_second.pk).slug
+        self.assertEqual(renamed, f"{'x' * (self.max_length - 2)}-2")
+        self.assertLessEqual(len(renamed), self.max_length)
+
+    def test_unrelated_slug_is_untouched(self) -> None:
+        Category = self.new_apps.get_model("kioblog", "Category")
+        self.assertEqual(Category.objects.get(pk=self.unrelated.pk).slug, "fine")
+
+    def test_treats_case_variants_as_colliding(self) -> None:
+        Category = self.new_apps.get_model("kioblog", "Category")
+        self.assertEqual(Category.objects.get(pk=self.case_first.pk).slug, "Foo")
+        self.assertEqual(Category.objects.get(pk=self.case_second.pk).slug, "foo-2")
+
+    def test_every_row_survives_with_a_distinct_slug(self) -> None:
+        Category = self.new_apps.get_model("kioblog", "Category")
+        slugs = list(Category.objects.values_list("slug", flat=True))
+        self.assertEqual(len(slugs), 9)
+        self.assertEqual(len(slugs), len(set(slugs)))
+
+
+class DeduplicateSlugsUsingParameterTests(SimpleTestCase):
+    def test_using_is_threaded_to_the_manager_and_save(self) -> None:
+        # A true cross-database check needs a second configured alias with
+        # its own test database, which this repo's dev settings don't set up
+        # - this instead proves the wiring itself: `using` reaches both the
+        # query and the write, which is what actually fixes reading/writing
+        # the "default" alias regardless of which connection is migrating.
+        # No real model needed (nothing here touches the database), which is
+        # also why this doesn't need Category as a fixture the way the
+        # collision scenarios above do.
+        fake_model = MagicMock()
+        fake_model.objects.using.return_value.order_by.return_value = []
+        fake_model._meta.get_field.return_value.max_length = 200
+
+        deduplicate_slugs(fake_model, using="replica")
+
+        fake_model.objects.using.assert_called_once_with("replica")
