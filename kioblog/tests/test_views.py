@@ -64,6 +64,20 @@ class KioblogViews(base.BaseTestCase):
         self.assertIn(self.post, response.context_data["posts"].paginator.object_list)
         self.assertNotIn(self.posts[0], response.context_data["posts"].paginator.object_list)
 
+    def test_unknown_category_slug_is_a_404(self) -> None:
+        # Before this, a mistyped or deleted category slug rendered an empty
+        # archive page with status 200 instead of a real 404.
+        response = self.client.get(reverse("kioblog-category", kwargs={"category": "does-not-exist"}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_unknown_category_slug_is_a_404_when_paginated(self) -> None:
+        response = self.client.get(reverse("kioblog-category-page", kwargs={"category": "does-not-exist", "page": 1}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_unknown_tag_slug_is_a_404(self) -> None:
+        response = self.client.get(reverse("kioblog-tag", kwargs={"tag": "does-not-exist"}))
+        self.assertEqual(response.status_code, 404)
+
     def test_category_pagination_preserves_filter(self) -> None:
         response = self.client.get(
             reverse("kioblog-category-page", kwargs={"category": self.category2.slug, "page": 2})
