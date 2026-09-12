@@ -15,8 +15,8 @@ from kioblog.tests import base
 class RenderCacheTests(base.BaseTestCase):
     def test_second_request_hits_the_cache_instead_of_re_rendering(self) -> None:
         with patch("kioblog.models.render_markdown", MagicMock(side_effect=render_markdown)) as mocked:
-            models.Post.objects.get(pk=self.post.pk).content_html
-            models.Post.objects.get(pk=self.post.pk).content_html
+            _ = models.Post.objects.get(pk=self.post.pk).content_html
+            _ = models.Post.objects.get(pk=self.post.pk).content_html
             self.assertEqual(mocked.call_count, 1)
 
     def test_cached_html_and_toc_match_a_fresh_render(self) -> None:
@@ -33,7 +33,7 @@ class RenderCacheTests(base.BaseTestCase):
         self.assertEqual(second.toc, expected_toc)
 
     def test_editing_the_post_invalidates_the_cached_render(self) -> None:
-        models.Post.objects.get(pk=self.post.pk).content_html  # populate the cache
+        _ = models.Post.objects.get(pk=self.post.pk).content_html  # populate the cache
 
         stale = models.Post.objects.get(pk=self.post.pk)
         stale.content = "# A brand new heading"
