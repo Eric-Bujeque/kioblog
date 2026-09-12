@@ -2,12 +2,13 @@ import re
 from html import unescape
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import models, router
 from django.db.models.signals import m2m_changed, post_save, pre_delete
 from django.utils import timezone
 from markdownx.models import MarkdownxField
 
-from kioblog.markdown.render import render_markdown
+from kioblog.markdown.render import RenderedContent, render_markdown
 
 
 class Category(models.Model):
@@ -141,9 +142,36 @@ class Post(models.Model):
                     update_fields = {*loaded, "updated"}
         super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
 
+    def _render_cache_key(self):
+        # None for an unsaved instance: there's no pk yet, and `updated` isn't
+        # set until the first save() (auto_now). _render() below falls back
+        # to the existing per-instance-only caching for that case, which
+        # already handles it correctly - it never touches the DB or cache.
+        if self.pk is None:
+            return None
+        return f"kioblog:post:{self.pk}:render:{self.updated.isoformat()}"
+
     def _render(self):
         if not hasattr(self, "_rendered"):
-            self._rendered = render_markdown(self.content)
+            cache_key = self._render_cache_key()
+            cached = cache.get(cache_key) if cache_key else None
+            if cached is not None:
+                # RenderedContent (a str subclass carrying .html/.toc as
+                # extra attributes) isn't picklable as-is - its __new__
+                # requires `toc`, which pickle's default str-subclass
+                # reconstruction doesn't know to supply. Verified this
+                # empirically (pickle.loads raised TypeError) before caching
+                # the plain (html, toc) tuple instead of the object itself.
+                html, toc = cached
+                self._rendered = RenderedContent(html, toc)
+            else:
+                self._rendered = render_markdown(self.content)
+                if cache_key:
+                    # No timeout: invalidation is the cache key changing
+                    # (bumped by `updated` on every save), not an expiry -
+                    # the old key just becomes unreferenced dead weight for
+                    # the cache backend's own eviction policy to reclaim.
+                    cache.set(cache_key, (self._rendered.html, self._rendered.toc), timeout=None)
         return self._rendered
 
     @property
