@@ -40,6 +40,10 @@ class Post(models.Model):
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
     created = models.DateField(auto_now_add=True)
     published = models.DateTimeField(default=timezone.now)
+    # Distinct from `published`: this tracks edits made after the post went
+    # live, so the sitemap's lastmod (see sitemap.py) reflects real changes
+    # instead of standing still at the original publish date forever.
+    updated = models.DateTimeField(auto_now=True)
     # PostView resolves by slug alone (DetailView.get_object -> .get()), which
     # raises MultipleObjectsReturned - uncaught, a 500 - if two posts share
     # one. See migration 0007 for how this is retrofitted onto existing data.

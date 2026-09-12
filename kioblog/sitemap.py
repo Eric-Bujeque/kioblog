@@ -25,7 +25,10 @@ class PostSitemap(Sitemap):
         return models.Post.objects.filter(draft=False)
 
     def lastmod(self, obj):
-        return obj.published
+        # `updated` (auto_now), not `published`: lastmod is supposed to say
+        # when the content last changed, and `published` never moves again
+        # once a post is edited after going live.
+        return obj.updated
 
     def location(self, obj):
         return reverse("kioblog-post", kwargs={"slug": obj.slug})

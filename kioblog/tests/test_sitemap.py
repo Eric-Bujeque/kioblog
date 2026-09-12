@@ -1,6 +1,7 @@
 from xml.etree import ElementTree
 
 from django.urls import reverse
+from django.utils import timezone
 
 from kioblog import models
 from kioblog.tests import base
@@ -71,3 +72,33 @@ class SitemapTests(base.BaseTestCase):
                 any(loc.endswith(path) for loc in locations),
                 f"{path} is missing from sitemap.xml",
             )
+
+    def _lastmod_for(self, path: str):
+        response = self.client.get(reverse("django.contrib.sitemaps.views.sitemap"))
+        self.assertEqual(response.status_code, 200)
+        root = ElementTree.fromstring(response.content)
+        for url_node in root.findall("sm:url", SITEMAP_NS):
+            loc = url_node.find("sm:loc", SITEMAP_NS).text
+            if loc.endswith(path):
+                node = url_node.find("sm:lastmod", SITEMAP_NS)
+                return node.text if node is not None else None
+        self.fail(f"{path} is missing from sitemap.xml")
+
+    def test_post_lastmod_reflects_the_last_edit_not_the_publish_date(self) -> None:
+        # Django's sitemap.xml template truncates lastmod to a bare date
+        # (Y-m-d, see the template - no time component), so published and
+        # updated must land on different *days* for this test to actually
+        # distinguish them; same-day, both would render identically either way.
+        self.post.published = timezone.now() - timezone.timedelta(days=10)
+        self.post.save()  # bumps `updated` to now via auto_now
+        self.post.refresh_from_db()
+
+        path = reverse("kioblog-post", kwargs={"slug": self.post.slug})
+        lastmod = self._lastmod_for(path)
+
+        self.assertEqual(lastmod, self.post.updated.strftime("%Y-%m-%d"))
+        self.assertNotEqual(
+            lastmod,
+            self.post.published.strftime("%Y-%m-%d"),
+            "lastmod matches the (backdated) publish date - it's still tracking `published`, not `updated`",
+        )
