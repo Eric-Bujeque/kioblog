@@ -1,5 +1,6 @@
 from django.core.paginator import Paginator
 from django.db.models import Q
+from django.http import Http404
 from django.utils.decorators import method_decorator
 from django.views import generic
 
@@ -17,6 +18,12 @@ class HomeView(generic.TemplateView):
         category = None
         if category_slug:
             category = models.Category.objects.filter(slug=category_slug).first()
+            if category is None:
+                # Without this, a mistyped or deleted category slug renders an
+                # empty archive page with a 200 instead of a 404 - bad for
+                # anyone following a stale link, and it feeds search engines
+                # a pile of thin, indexable pages for URLs that don't exist.
+                raise Http404(f"No category found matching the slug '{category_slug}'")
             posts = posts.filter(category__slug=category_slug)
 
         paginator = Paginator(posts, 5)
@@ -38,6 +45,8 @@ class TagView(generic.TemplateView):
         tag_slug = kwargs.get("tag")
         page = kwargs.get("page", 1)
         tag = models.Tag.objects.filter(slug=tag_slug).first()
+        if tag is None:
+            raise Http404(f"No tag found matching the slug '{tag_slug}'")
         posts = models.Post.objects.filter(draft=False, tags__slug=tag_slug)
         paginator = Paginator(posts, 5)
         return {
