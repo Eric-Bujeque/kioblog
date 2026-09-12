@@ -40,7 +40,10 @@ class Post(models.Model):
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
     created = models.DateField(auto_now_add=True)
     published = models.DateTimeField(default=timezone.now)
-    slug = models.SlugField(max_length=200)
+    # PostView resolves by slug alone (DetailView.get_object -> .get()), which
+    # raises MultipleObjectsReturned - uncaught, a 500 - if two posts share
+    # one. See migration 0007 for how this is retrofitted onto existing data.
+    slug = models.SlugField(max_length=200, unique=True)
     image = models.FileField(upload_to=settings.UPLOAD_TO, null=True)
     draft = models.BooleanField(default=False)
     tags = models.ManyToManyField(Tag, blank=True, related_name="posts")
