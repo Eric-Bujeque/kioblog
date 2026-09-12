@@ -5,6 +5,7 @@ from markdownx.views import ImageUploadView, MarkdownifyView
 
 from kioblog import sitemap as blog_sitemap
 from kioblog import views
+from kioblog.feeds import PostFeed
 
 generated_sitemap = {
     "posts": blog_sitemap.PostSitemap,
@@ -26,6 +27,7 @@ urlpatterns = [
     # SEO
     path("robots.txt", include("robots.urls")),
     path("sitemap.xml", sitemap, {"sitemaps": generated_sitemap}, name="django.contrib.sitemaps.views.sitemap"),
+    path("feed.xml", PostFeed(), name="kioblog-feed"),
     # MARKDOWN EDITOR
     # markdownx ships these views with no auth check of their own (anyone could
     # POST an image to ImageUploadView), so wrap them in staff_member_required

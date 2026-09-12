@@ -151,7 +151,7 @@ Mounted relative to your prefix:
 | `/tag/<slug>/page/<n>/` | `kioblog-tag-page` | Tag archive, paginated |
 | `/search/?q=` | `kioblog-search` | Case-insensitive substring match on title, excerpt or content — no tokenising, stemming or ranking |
 | `/<slug>/` | `kioblog-post` | Single post |
-| `/robots.txt`, `/sitemap.xml` | | SEO |
+| `/robots.txt`, `/sitemap.xml`, `/feed.xml` | | SEO. The feed's title and description follow the `blog_title`/`meta_description` `Meta` settings below |
 
 ## Writing posts
 
