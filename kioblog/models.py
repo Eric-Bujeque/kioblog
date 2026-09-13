@@ -55,6 +55,7 @@ class Category(models.Model):
 
     class Meta:
         verbose_name_plural = "Categories"
+        ordering = ["title"]
 
 
 class Tag(models.Model):
@@ -63,6 +64,9 @@ class Tag(models.Model):
 
     def __str__(self):
         return self.title
+
+    class Meta:
+        ordering = ["title"]
 
 
 class Post(models.Model):
