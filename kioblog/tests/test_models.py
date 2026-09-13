@@ -104,6 +104,20 @@ class KioblogModels(base.BaseTestCase):
             with transaction.atomic():
                 models.Category.objects.create(title="duplicate", slug=self.category.slug)
 
+    def test_category_default_ordering_is_by_title(self) -> None:
+        # Created in the "wrong" order on purpose: pk/insertion order would
+        # put Zebra before Apple, and this must not depend on order_by() -
+        # sitemap.py's CategorySitemap.items() is a bare .objects.all().
+        zebra = models.Category.objects.create(title="Zebra", slug="zebra")
+        apple = models.Category.objects.create(title="Apple", slug="apple")
+        ordered = list(models.Category.objects.filter(pk__in=[zebra.pk, apple.pk]))
+        self.assertEqual(ordered, [apple, zebra])
+
+    def test_tag_default_ordering_is_by_title(self) -> None:
+        zebra = models.Tag.objects.create(title="Zebra", slug="zebra")
+        apple = models.Tag.objects.create(title="Apple", slug="apple")
+        self.assertEqual(list(models.Tag.objects.all()), [apple, zebra])
+
     def test_category_post_count_ignores_drafts(self) -> None:
         models.Post.objects.create(
             title="draft", content="x", user=self.user, category=self.category, slug="draft", draft=True
