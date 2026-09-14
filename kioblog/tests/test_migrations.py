@@ -10,9 +10,11 @@ reimplementation of it - kioblog.slugs.deduplicate_slugs already has a
 narrower unit-style check in test_slugs.py.
 """
 
+import importlib
+
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase, override_settings
+from django.test import SimpleTestCase, TransactionTestCase, override_settings
 
 
 class DeduplicatePostSlugsMigrationTests(TransactionTestCase):
@@ -133,3 +135,15 @@ class PostSlugFoldSettingOverrideMigrationTests(TransactionTestCase):
         Post = new_apps.get_model("kioblog", "Post")
         self.assertEqual(Post.objects.get(pk=case_first.pk).slug, "Foo")
         self.assertEqual(Post.objects.get(pk=case_second.pk).slug, "foo-2")
+
+
+class PostUpdatedFieldMigrationTests(SimpleTestCase):
+    def test_does_not_persist_its_one_off_backfill_default(self) -> None:
+        # Without preserve_default=False, the timezone.now default used to
+        # backfill existing rows gets baked into the ongoing migration state
+        # even though Post.updated has none (only auto_now=True) - confirmed
+        # with `makemigrations --check --dry-run`, which then proposes a
+        # no-op AlterField purely to reconcile that phantom default away.
+        module = importlib.import_module("kioblog.migrations.0008_post_updated")
+        add_field = module.Migration.operations[0]
+        self.assertFalse(add_field.preserve_default)

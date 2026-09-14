@@ -17,5 +17,11 @@ class Migration(migrations.Migration):
             # for `published` in 0004. From the next save() on, auto_now takes
             # over and this default is never consulted again.
             field=models.DateTimeField(auto_now=True, default=django.utils.timezone.now),
+            # Without this, the default above gets baked into the ongoing
+            # migration *state* even though the model has none (only
+            # auto_now=True) - confirmed with `makemigrations --check
+            # --dry-run`, which then proposes a no-op AlterField purely to
+            # reconcile that phantom default away.
+            preserve_default=False,
         ),
     ]
