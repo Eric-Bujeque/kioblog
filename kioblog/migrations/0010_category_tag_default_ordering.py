@@ -9,6 +9,11 @@ warning, until it grows past that cap.
 
 AlterModelOptions has no schema to migrate - `ordering` is Meta-only,
 never a column - so this is pure migration-history bookkeeping.
+
+`title` alone isn't a total order - neither model's title is unique - so it
+ends in `id` as a tiebreaker, the same shape as Post's `-published, -id`.
+Without it, two rows sharing a title have no guaranteed relative order,
+which is exactly the kind of gap this migration exists to close.
 """
 
 from django.db import migrations
@@ -23,10 +28,10 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AlterModelOptions(
             name='category',
-            options={'ordering': ['title'], 'verbose_name_plural': 'Categories'},
+            options={'ordering': ['title', 'id'], 'verbose_name_plural': 'Categories'},
         ),
         migrations.AlterModelOptions(
             name='tag',
-            options={'ordering': ['title']},
+            options={'ordering': ['title', 'id']},
         ),
     ]

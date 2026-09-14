@@ -118,6 +118,19 @@ class KioblogModels(base.BaseTestCase):
         apple = models.Tag.objects.create(title="Apple", slug="apple")
         self.assertEqual(list(models.Tag.objects.all()), [apple, zebra])
 
+    def test_category_ordering_declares_an_id_tiebreaker(self) -> None:
+        # `title` alone isn't unique, so `ordering = ["title"]` alone gives SQL
+        # no tiebreaker for two rows sharing one - undefined relative order,
+        # which could flip between two page fetches. Asserted on the Meta
+        # option directly rather than by creating two same-titled rows and
+        # checking their order: SQLite happens to preserve insertion order for
+        # a tied sort key in this simple a query, so that version of the test
+        # passed even before `id` was added - it proved nothing.
+        self.assertEqual(models.Category._meta.ordering, ["title", "id"])
+
+    def test_tag_ordering_declares_an_id_tiebreaker(self) -> None:
+        self.assertEqual(models.Tag._meta.ordering, ["title", "id"])
+
     def test_category_post_count_ignores_drafts(self) -> None:
         models.Post.objects.create(
             title="draft", content="x", user=self.user, category=self.category, slug="draft", draft=True
