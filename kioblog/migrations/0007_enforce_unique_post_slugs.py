@@ -20,7 +20,11 @@ from kioblog.slugs import deduplicate_slugs
 
 def deduplicate_post_slugs(apps, schema_editor):
     Post = apps.get_model('kioblog', 'Post')
-    deduplicate_slugs(Post)
+    # Without `using`, the historical model's default manager always reads
+    # and writes the "default" database alias, regardless of which
+    # connection `migrate` is actually targeting - Django's own migration
+    # docs call this out explicitly for RunPython operations.
+    deduplicate_slugs(Post, using=schema_editor.connection.alias)
 
 
 class Migration(migrations.Migration):

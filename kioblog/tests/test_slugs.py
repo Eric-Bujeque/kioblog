@@ -7,12 +7,45 @@ migration 0007 exercises the same function against Post's actual migration
 history in test_migrations.py; this just isolates the renaming algorithm.
 """
 
+from unittest.mock import MagicMock
+
 from kioblog import models
 from kioblog.slugs import deduplicate_slugs
 from kioblog.tests import base
 
 
 class DeduplicateSlugsTests(base.BaseTestCase):
+    def test_treats_case_variants_as_colliding(self) -> None:
+        # SQLite's default collation is case-sensitive, so "Foo"/"foo" can
+        # coexist here without even reaching this function - but a
+        # case-insensitive collation (MySQL's default, for one) would treat
+        # them as the same value for a unique index. Matching that
+        # pessimistically means the AlterField that follows this migration
+        # doesn't fail on installations using such a database.
+        first = models.Category.objects.create(title="one", slug="Foo")
+        second = models.Category.objects.create(title="two", slug="foo")
+
+        deduplicate_slugs(models.Category)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.slug, "Foo")
+        self.assertEqual(second.slug, "foo-2")
+
+    def test_using_is_threaded_to_the_manager_and_save(self) -> None:
+        # A true cross-database check needs a second configured alias with
+        # its own test database, which this repo's dev settings don't set up
+        # - this instead proves the wiring itself: `using` reaches both the
+        # query and the write, which is what actually fixes reading/writing
+        # the "default" alias regardless of which connection is migrating.
+        fake_model = MagicMock()
+        fake_model.objects.using.return_value.order_by.return_value = []
+        fake_model._meta.get_field.return_value.max_length = 200
+
+        deduplicate_slugs(fake_model, using="replica")
+
+        fake_model.objects.using.assert_called_once_with("replica")
+
     def test_keeps_the_first_row_and_renames_the_rest(self) -> None:
         first = models.Category.objects.create(title="one", slug="cat")
         second = models.Category.objects.create(title="two", slug="cat")
