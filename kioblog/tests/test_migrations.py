@@ -492,3 +492,70 @@ class CategoryTagDefaultOrderingMigrationTests(TransactionTestCase):
     def test_tag_ordering_is_title_then_id_after_the_migration(self) -> None:
         Tag = self.new_apps.get_model("kioblog", "Tag")
         self.assertEqual(Tag._meta.ordering, ["title", "id"])
+
+
+class DeleteCommentMigrationTests(TransactionTestCase):
+    # TransactionTestCase, not TestCase, for the same reason as the classes
+    # above: reversing a migration needs SQLite's foreign_keys pragma
+    # toggled, which it refuses mid-transaction.
+    migrate_from = ("kioblog", "0010_category_tag_default_ordering")
+    migrate_to = ("kioblog", "0011_delete_comment")
+
+    def tearDown(self) -> None:
+        # Leave the database on the newest migration regardless of which
+        # test ran or how it finished. The current kioblog.models no longer
+        # has a Comment class at all (this PR removes it), so a leftover row
+        # from the "refuses" test has to be reached through the model as it
+        # exists at whatever migration state got left behind, not imported
+        # directly - 0011 cannot apply while one exists.
+        executor = MigrationExecutor(connection)
+        current_apps = executor.loader.project_state(list(executor.loader.applied_migrations)).apps
+        try:
+            Comment = current_apps.get_model("kioblog", "Comment")
+        except LookupError:
+            pass  # already past 0011 - nothing to clean up
+        else:
+            Comment.objects.all().delete()
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_refuses_to_migrate_if_a_comment_row_exists(self) -> None:
+        # Comment was registered in the admin, so a staff user could have
+        # created rows through Django's generic CRUD with no public form
+        # involved at all - nothing in kioblog's own code proves an existing
+        # installation's table is actually empty.
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        User = old_apps.get_model("auth", "User")
+        Category = old_apps.get_model("kioblog", "Category")
+        Post = old_apps.get_model("kioblog", "Post")
+        Comment = old_apps.get_model("kioblog", "Comment")
+
+        user = User.objects.create(username="migrationtestuser")
+        category = Category.objects.create(title="cat", slug="cat")
+        post = Post.objects.create(title="T", content="x", user=user, category=category, slug="s")
+        Comment.objects.create(username="commenter", content="hi", post=post, email="a@b.com")
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        with self.assertRaises(RuntimeError):
+            executor.migrate([self.migrate_to])
+
+        # The migration's own transaction rolled back, so 0011 was never
+        # recorded as applied.
+        executor = MigrationExecutor(connection)
+        self.assertNotIn(self.migrate_to, executor.loader.applied_migrations)
+
+    def test_migrates_cleanly_when_no_comments_exist(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate([self.migrate_to])  # must not raise
+
+        new_apps = executor.loader.project_state([self.migrate_to]).apps
+        with self.assertRaises(LookupError):
+            new_apps.get_model("kioblog", "Comment")
