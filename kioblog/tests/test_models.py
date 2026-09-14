@@ -124,7 +124,7 @@ class KioblogModels(base.BaseTestCase):
         # which could flip between two page fetches. Asserted on the Meta
         # option directly rather than by creating two same-titled rows and
         # checking their order: SQLite happens to preserve insertion order for
-        # a tied sort key in this simple a query, so that version of the test
+        # a tied sort key in a query this simple, so that version of the test
         # passed even before `id` was added - it proved nothing.
         self.assertEqual(models.Category._meta.ordering, ["title", "id"])
 
