@@ -15,6 +15,7 @@ import importlib
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import SimpleTestCase, TransactionTestCase, override_settings
+from django.utils import timezone
 
 
 class DeduplicatePostSlugsMigrationTests(TransactionTestCase):
@@ -137,7 +138,7 @@ class PostSlugFoldSettingOverrideMigrationTests(TransactionTestCase):
         self.assertEqual(Post.objects.get(pk=case_second.pk).slug, "foo-2")
 
 
-class PostUpdatedFieldMigrationTests(SimpleTestCase):
+class PostUpdatedFieldStateTests(SimpleTestCase):
     def test_does_not_persist_its_one_off_backfill_default(self) -> None:
         # Without preserve_default=False, the timezone.now default used to
         # backfill existing rows gets baked into the ongoing migration state
@@ -147,3 +148,60 @@ class PostUpdatedFieldMigrationTests(SimpleTestCase):
         module = importlib.import_module("kioblog.migrations.0008_post_updated")
         add_field = module.Migration.operations[0]
         self.assertFalse(add_field.preserve_default)
+
+
+class PostUpdatedBackfillMigrationTests(TransactionTestCase):
+    # TransactionTestCase, not TestCase, for the same reason as the classes
+    # above: reversing a migration needs SQLite's foreign_keys pragma
+    # toggled, which it refuses mid-transaction.
+    migrate_from = ("kioblog", "0007_enforce_unique_post_slugs")
+    migrate_to = ("kioblog", "0008_post_updated")
+
+    def setUp(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        User = old_apps.get_model("auth", "User")
+        Category = old_apps.get_model("kioblog", "Category")
+        Post = old_apps.get_model("kioblog", "Post")
+
+        user = User.objects.create(username="migrationtestuser")
+        category = Category.objects.create(title="cat", slug="cat")
+        # An old post, "published" long before this migration ever runs -
+        # the field this migration is retrofitting doesn't exist yet at 0007.
+        self.old_published = timezone.now() - timezone.timedelta(days=365)
+        self.post = Post.objects.create(
+            title="old post", content="x", user=user, category=category, slug="s", published=self.old_published
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate([self.migrate_to])
+        self.new_apps = executor.loader.project_state([self.migrate_to]).apps
+
+    def tearDown(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_backfills_updated_from_published_not_the_deploy_moment(self) -> None:
+        # Left at the AddField's own default, every pre-existing post would
+        # report "updated" at the moment this migration ran - exactly what
+        # PostSitemap.lastmod (sitemap.py) exists to not do, and a likely
+        # one-time mass recrawl trigger for a site upgrading kioblog.
+        Post = self.new_apps.get_model("kioblog", "Post")
+        post = Post.objects.get(pk=self.post.pk)
+        self.assertEqual(post.updated, self.old_published)
+
+    def test_a_real_save_after_the_migration_still_moves_it(self) -> None:
+        # Confirms auto_now itself is intact after the backfill overwrites
+        # its one-off default - this migration's RunPython uses .update(),
+        # which bypasses save()/auto_now entirely, so it's worth confirming
+        # the field still behaves normally once code starts touching it.
+        Post = self.new_apps.get_model("kioblog", "Post")
+        post = Post.objects.get(pk=self.post.pk)
+        post.title = "edited"
+        post.save()
+        post.refresh_from_db()
+        self.assertGreater(post.updated, self.old_published)

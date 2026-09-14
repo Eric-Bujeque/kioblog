@@ -86,16 +86,32 @@ class SitemapTests(base.BaseTestCase):
 
     def test_post_lastmod_reflects_the_last_edit_not_the_publish_date(self) -> None:
         # Django's sitemap.xml template truncates lastmod to a bare date
-        # (Y-m-d, see the template - no time component), so published and
-        # updated must land on different *days* for this test to actually
-        # distinguish them; same-day, both would render identically either way.
-        self.post.published = timezone.now() - timezone.timedelta(days=10)
-        self.post.save()  # bumps `updated` to now via auto_now
+        # (Y-m-d, see the template - no time component), so the backdated and
+        # current dates must land on different *days* for this test to
+        # actually distinguish them; same-day, both would render identically
+        # either way.
+        #
+        # Backdates BOTH published and updated first (bypassing save()/
+        # auto_now via .update(), the way earlier tests in this session
+        # backdate `updated`), then edits *content only* and saves -
+        # published is never touched again. A test that just backdates
+        # published, saves once, and checks lastmod moved would still pass
+        # if auto_now fired on every save regardless of what changed; this
+        # one isolates that the edit itself is what's doing it.
+        backdated = timezone.now() - timezone.timedelta(days=10)
+        self.post.published = backdated
+        self.post.save()
+        models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
+        self.post.refresh_from_db()
+
+        self.post.content = "# Edited after backdating"
+        self.post.save()
         self.post.refresh_from_db()
 
         path = reverse("kioblog-post", kwargs={"slug": self.post.slug})
         lastmod = self._lastmod_for(path)
 
+        self.assertEqual(self.post.published, backdated, "the edit above must not have moved published")
         self.assertEqual(lastmod, self.post.updated.strftime("%Y-%m-%d"))
         self.assertNotEqual(
             lastmod,
