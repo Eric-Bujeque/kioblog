@@ -1,3 +1,4 @@
+import hashlib
 import re
 from html import unescape
 
@@ -9,6 +10,21 @@ from django.utils import timezone
 from markdownx.models import MarkdownxField
 
 from kioblog.markdown.render import RenderedContent, render_markdown
+
+# Bump when render_markdown's output changes shape (code_chrome.py markup,
+# pygments_onedark.py styling, the toc extension's settings, ...) - the cache
+# key below has no way to know a new kioblog release changed what the same
+# `content` renders to, so without this a post nobody has edited keeps
+# serving the previous version's HTML/toc until its entry happens to expire.
+_RENDER_CACHE_VERSION = 1
+
+# Deliberately bounded, not None: the key changes on every edit (see
+# Post._render_cache_key), so with no timeout every past revision of every
+# post leaves a permanent cache entry - fine for LocMemCache/Memcached, which
+# cap their own size, but Redis's default maxmemory-policy is `noeviction`,
+# so an unconfigured Redis-backed cache would grow forever. 30 days bounds
+# the worst case without meaningfully hurting the hit rate for unedited posts.
+_RENDER_CACHE_TIMEOUT = 60 * 60 * 24 * 30
 
 
 class Category(models.Model):
@@ -143,13 +159,23 @@ class Post(models.Model):
         super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
 
     def _render_cache_key(self):
-        # None for an unsaved instance: there's no pk yet, and `updated` isn't
-        # set until the first save() (auto_now). _render() below falls back
-        # to the existing per-instance-only caching for that case, which
-        # already handles it correctly - it never touches the DB or cache.
+        # None skips the shared cache entirely, falling back to the
+        # per-instance-only caching below - correct for an unsaved instance
+        # (pk is None) and for one with in-memory changes never written to the
+        # database (self.content, which the hash below is always computed
+        # from, already reflects those - there's nothing stale to serve).
+        #
+        # Deliberately keyed on a hash of content, not on `pk` + `updated`:
+        # render_markdown is a pure function of `content` alone, so hashing it
+        # directly means the key is correct by construction rather than by
+        # keeping a proxy (`updated`) in sync with it - which also sidesteps
+        # a manually-assigned pk on an unsaved instance (updated is still None
+        # there; content never is) and an in-memory content edit that was
+        # never saved (updated wouldn't move, but content already has).
         if self.pk is None:
             return None
-        return f"kioblog:post:{self.pk}:render:{self.updated.isoformat()}"
+        digest = hashlib.sha256(self.content.encode("utf-8")).hexdigest()[:16]
+        return f"kioblog:post:{self.pk}:render:v{_RENDER_CACHE_VERSION}:{digest}"
 
     def _render(self):
         if not hasattr(self, "_rendered"):
@@ -167,11 +193,12 @@ class Post(models.Model):
             else:
                 self._rendered = render_markdown(self.content)
                 if cache_key:
-                    # No timeout: invalidation is the cache key changing
-                    # (bumped by `updated` on every save), not an expiry -
-                    # the old key just becomes unreferenced dead weight for
-                    # the cache backend's own eviction policy to reclaim.
-                    cache.set(cache_key, (self._rendered.html, self._rendered.toc), timeout=None)
+                    # Bounded timeout, not None: the key changes on every
+                    # edit, so an unbounded one leaves every past revision of
+                    # every post permanently cached - see
+                    # _RENDER_CACHE_TIMEOUT for why that's a real risk on a
+                    # Redis-backed cache specifically.
+                    cache.set(cache_key, (self._rendered.html, self._rendered.toc), timeout=_RENDER_CACHE_TIMEOUT)
         return self._rendered
 
     @property
