@@ -120,6 +120,24 @@ class Post(models.Model):
         )
         return qs[:limit]
 
+    @staticmethod
+    def _display_name(user):
+        """Best display name for a settings.AUTH_USER_MODEL instance.
+
+        Not necessarily Django's built-in User: a custom user model (e.g.
+        USERNAME_FIELD = "email") can lack .username entirely, and one built
+        directly on AbstractBaseUser rather than AbstractUser can lack
+        get_full_name() too. get_username() is the one method every user
+        model contract guarantees (AbstractBaseUser.get_username(),
+        confirmed in Django's own source), so it's the fallback for both.
+        A plain staticmethod rather than inline in json_ld so it can be unit
+        tested against a minimal stand-in - Post.user is a real ForeignKey,
+        and Django rejects assigning anything but a real related-model
+        instance to it, even unsaved and in-memory.
+        """
+        full_name = user.get_full_name() if hasattr(user, "get_full_name") else ""
+        return full_name or user.get_username()
+
     @property
     def json_ld(self):
         """BlogPosting structured data, ready to embed - see the HTML-escape
@@ -131,7 +149,7 @@ class Post(models.Model):
             "headline": self.title,
             "description": self.display_excerpt,
             "datePublished": self.published,
-            "author": {"@type": "Person", "name": self.user.get_full_name() or self.user.username},
+            "author": {"@type": "Person", "name": self._display_name(self.user)},
         }
         if self.image:
             data["image"] = self.image.url
