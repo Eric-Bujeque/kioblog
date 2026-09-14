@@ -138,9 +138,9 @@ class KioblogModels(base.BaseTestCase):
     def test_json_ld_escapes_a_script_close_tag_so_it_cant_break_out(self) -> None:
         # json.dumps alone would emit a literal "</script>" here. HTML parses
         # <script> as "raw text": the browser never entity-decodes what's
-        # inside it, so that literal "</script>" would close the real tag
-        # post.html embeds this JSON-LD in early - everything after it would
-        # render as plain page text instead of being parsed as JSON-LD.
+        # inside it, so that literal "</script>" would close the early
+        # script tag post.html embeds this JSON-LD in - everything after it
+        # would render as plain page text instead of being parsed as JSON-LD.
         self.post.title = "</script><script>alert(1)</script>"
         raw = self.post.json_ld
         self.assertNotIn("</script>", raw)
