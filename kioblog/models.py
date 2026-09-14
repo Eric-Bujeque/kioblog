@@ -62,6 +62,26 @@ class Post(models.Model):
     class Meta:
         ordering = ["-published", "-id"]
 
+    def save(self, *args, **kwargs):
+        # save(update_fields=[...]) that omits "updated" would otherwise skip
+        # auto_now entirely - Django's _save_table only calls pre_save() (what
+        # auto_now relies on) for fields actually listed in update_fields.
+        # Confirmed against Django's own source and a standalone repro:
+        # post.save(update_fields=["content"]) left `updated` untouched, which
+        # would make the sitemap's lastmod (see sitemap.py) silently stop
+        # reflecting edits made through any partial save.
+        #
+        # Checked on a *truthy* update_fields, not just "is not None": Django
+        # treats an explicitly empty update_fields ([] or set()) as "skip the
+        # save entirely" - confirmed in Model.save()'s own source, `if not
+        # update_fields: return`, before touching the database at all. Firing
+        # on `is not None` would have turned that intentional no-op into a
+        # real write of just {"updated"}.
+        update_fields = kwargs.get("update_fields")
+        if update_fields:
+            kwargs["update_fields"] = {*update_fields, "updated"}
+        super().save(*args, **kwargs)
+
     def _render(self):
         if not hasattr(self, "_rendered"):
             self._rendered = render_markdown(self.content)

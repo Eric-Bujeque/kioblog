@@ -118,3 +118,25 @@ class SitemapTests(base.BaseTestCase):
             self.post.published.strftime("%Y-%m-%d"),
             "lastmod matches the (backdated) publish date - it's still tracking `published`, not `updated`",
         )
+
+    def test_post_lastmod_moves_on_a_partial_save_too(self) -> None:
+        # save(update_fields=[...]) that omits "updated" would otherwise skip
+        # auto_now entirely - Django's _save_table only calls pre_save() (what
+        # auto_now relies on) for fields actually listed in update_fields,
+        # confirmed against Django's own source. Left unhandled, an edit made
+        # through any partial save - not unusual: forms, admin actions, and
+        # signal handlers often save() only the fields they touched - would
+        # silently stop moving lastmod.
+        backdated = timezone.now() - timezone.timedelta(days=10)
+        models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
+        self.post.refresh_from_db()
+
+        self.post.content = "# Partial save heading"
+        self.post.save(update_fields=["content"])
+        self.post.refresh_from_db()
+
+        path = reverse("kioblog-post", kwargs={"slug": self.post.slug})
+        lastmod = self._lastmod_for(path)
+
+        self.assertGreater(self.post.updated, backdated)
+        self.assertEqual(lastmod, self.post.updated.strftime("%Y-%m-%d"))
