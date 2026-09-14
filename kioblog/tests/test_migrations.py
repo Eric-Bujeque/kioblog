@@ -566,3 +566,10 @@ class DeleteCommentMigrationTests(TransactionTestCase):
         new_apps = executor.loader.project_state([self.migrate_to]).apps
         with self.assertRaises(LookupError):
             new_apps.get_model("kioblog", "Comment")
+
+        # The check above only proves the migration *state* no longer has a
+        # Comment model - it says nothing about whether DeleteModel actually
+        # dropped the table. An accidentally no-op or state-only deletion
+        # would pass it just as well while leaving kioblog_comment sitting in
+        # deployed databases, so this asks the database directly too.
+        self.assertNotIn("kioblog_comment", connection.introspection.table_names())
