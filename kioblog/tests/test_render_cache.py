@@ -159,6 +159,16 @@ class RenderCacheTests(base.BaseTestCase):
     def test_unsaved_post_still_renders_without_touching_the_cache(self) -> None:
         # No pk yet, and `updated` isn't set until the first save() - a
         # downstream consumer previewing an unsaved Post must not crash.
+        #
+        # Patches cache.get/cache.set directly rather than only checking the
+        # render is correct: the render alone would pass even if this path
+        # wastefully called through to the cache, which the test's own name
+        # promises it doesn't.
         unsaved = models.Post(title="draft", content="# Preview", user=self.user, category=self.category)
         self.assertIsNone(unsaved.pk)
-        self.assertIn("Preview", unsaved.content_html)
+
+        with patch("kioblog.models.cache.get") as mocked_get, patch("kioblog.models.cache.set") as mocked_set:
+            self.assertIn("Preview", unsaved.content_html)
+
+        mocked_get.assert_not_called()
+        mocked_set.assert_not_called()
