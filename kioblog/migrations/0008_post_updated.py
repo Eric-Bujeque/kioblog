@@ -12,7 +12,7 @@ def backfill_updated_from_published(apps, schema_editor):
     # likely triggering a one-time mass recrawl. `published` is the closest
     # thing to a real "last known state" timestamp already on these rows -
     # it's also what lastmod already pointed at before this migration, so
-    # this backfill is a no-op for lastmod's *output*, not just a improvement.
+    # this backfill is a no-op for lastmod's *output*, not just an improvement.
     Post = apps.get_model('kioblog', 'Post')
     Post.objects.using(schema_editor.connection.alias).update(updated=models.F('published'))
 
