@@ -540,8 +540,15 @@ class DeleteCommentMigrationTests(TransactionTestCase):
 
         executor = MigrationExecutor(connection)
         executor.loader.build_graph()
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(RuntimeError) as cm:
             executor.migrate([self.migrate_to])
+
+        # The error is the only recovery guidance an operator sees, and by
+        # the time they read it the installed kioblog no longer has a
+        # Comment model for ORM-based advice (dumpdata, a shell import) to
+        # work against - it has to name the real table so a database-level
+        # tool can still find it.
+        self.assertIn("kioblog_comment", str(cm.exception))
 
         # The migration's own transaction rolled back, so 0011 was never
         # recorded as applied.
