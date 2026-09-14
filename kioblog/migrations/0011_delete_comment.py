@@ -12,6 +12,15 @@ kioblog *ships* writes to it - Comment was registered in the admin
 Django's generic CRUD with no public form involved at all. An existing
 installation's database is not something this migration can see, so it
 refuses to run if it isn't actually empty rather than assuming it is.
+
+That refusal check and the DeleteModel that follows it are not atomic
+against a concurrent writer: `count()` takes no lock, so a row inserted by
+another process between the check and the drop is deleted anyway despite
+the check having passed. Not fixed with table/row locking here - the
+locking syntax needed isn't portable across the backends this package
+supports, for a guard that exists for a one-time, manually-triggered
+migration. Run this the way any irreversible schema change should run: in
+a maintenance window, with nothing else writing to Comment.
 """
 
 from django.db import migrations
