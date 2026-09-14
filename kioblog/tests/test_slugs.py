@@ -32,6 +32,22 @@ class DeduplicateSlugsTests(base.BaseTestCase):
         self.assertEqual(first.slug, "Foo")
         self.assertEqual(second.slug, "foo-2")
 
+    def test_treats_accent_variants_as_colliding(self) -> None:
+        # Same reasoning as the case-variant test above, for accents instead
+        # of case: MySQL's accent-insensitive collations (the `*_ai_ci`
+        # family) treat "café" and "cafe" as the same value for a unique
+        # index, even though SQLite - case-sensitive by default too - lets
+        # both coexist here without even reaching this function.
+        first = models.Category.objects.create(title="one", slug="café")
+        second = models.Category.objects.create(title="two", slug="cafe")
+
+        deduplicate_slugs(models.Category)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.slug, "café")
+        self.assertEqual(second.slug, "cafe-2")
+
     def test_using_is_threaded_to_the_manager_and_save(self) -> None:
         # A true cross-database check needs a second configured alias with
         # its own test database, which this repo's dev settings don't set up
@@ -46,7 +62,7 @@ class DeduplicateSlugsTests(base.BaseTestCase):
         first = MagicMock(slug="dup")
         second = MagicMock(slug="dup")
         fake_model = MagicMock()
-        fake_model.objects.using.return_value.order_by.return_value = [first, second]
+        fake_model.objects.using.return_value.only.return_value.order_by.return_value = [first, second]
         fake_model._meta.get_field.return_value.max_length = 200
 
         deduplicate_slugs(fake_model, using="replica")
