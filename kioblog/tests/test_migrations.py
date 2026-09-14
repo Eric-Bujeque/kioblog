@@ -255,6 +255,10 @@ class DeduplicateCategorySlugsMigrationTests(TransactionTestCase):
         # collide outside a reversed migration state like this one.
         self.case_first = Category.objects.create(title="Case A", slug="Foo")
         self.case_second = Category.objects.create(title="Case B", slug="foo")
+        # Same reasoning, for an accent-insensitive collation instead of a
+        # case-insensitive one (MySQL's `*_ai_ci` family).
+        self.accent_first = Category.objects.create(title="Accent A", slug="café")
+        self.accent_second = Category.objects.create(title="Accent B", slug="cafe")
 
         executor = MigrationExecutor(connection)
         executor.loader.build_graph()
@@ -293,10 +297,15 @@ class DeduplicateCategorySlugsMigrationTests(TransactionTestCase):
         self.assertEqual(Category.objects.get(pk=self.case_first.pk).slug, "Foo")
         self.assertEqual(Category.objects.get(pk=self.case_second.pk).slug, "foo-2")
 
+    def test_treats_accent_variants_as_colliding(self) -> None:
+        Category = self.new_apps.get_model("kioblog", "Category")
+        self.assertEqual(Category.objects.get(pk=self.accent_first.pk).slug, "café")
+        self.assertEqual(Category.objects.get(pk=self.accent_second.pk).slug, "cafe-2")
+
     def test_every_row_survives_with_a_distinct_slug(self) -> None:
         Category = self.new_apps.get_model("kioblog", "Category")
         slugs = list(Category.objects.values_list("slug", flat=True))
-        self.assertEqual(len(slugs), 9)
+        self.assertEqual(len(slugs), 11)
         self.assertEqual(len(slugs), len(set(slugs)))
 
 
@@ -318,7 +327,7 @@ class DeduplicateSlugsUsingParameterTests(SimpleTestCase):
         first = MagicMock(slug="dup")
         second = MagicMock(slug="dup")
         fake_model = MagicMock()
-        fake_model.objects.using.return_value.order_by.return_value = [first, second]
+        fake_model.objects.using.return_value.only.return_value.order_by.return_value = [first, second]
         fake_model._meta.get_field.return_value.max_length = 200
 
         deduplicate_slugs(fake_model, using="replica")
