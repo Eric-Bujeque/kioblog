@@ -21,13 +21,23 @@ def refuse_if_comments_exist(apps, schema_editor):
     Comment = apps.get_model('kioblog', 'Comment')
     count = Comment.objects.using(schema_editor.connection.alias).count()
     if count:
+        # Deliberately NOT "run dumpdata kioblog.Comment" or "delete via the
+        # ORM from a shell": by the time an operator reads this, the kioblog
+        # version they have INSTALLED is the one that removed Comment from
+        # models.py/admin.py - the app registry no longer has it, so any
+        # advice that goes through the ORM (dumpdata, `from kioblog.models
+        # import Comment`) fails too. Only database-level guidance survives
+        # that.
         raise RuntimeError(
             f"Refusing to migrate: {count} Comment row(s) still exist, and this "
-            "migration deletes the Comment table entirely. Back them up first, "
-            "e.g.:\n"
-            "  python manage.py dumpdata kioblog.Comment > comments_backup.json\n"
-            "then re-run migrate. To proceed anyway and discard them, delete the "
-            "rows first (Comment.objects.all().delete() from a shell)."
+            "migration deletes the Comment table entirely. This version of "
+            "kioblog no longer has a Comment model for the ORM to reach - back "
+            "the table up at the database level first, with your engine's own "
+            "tool (pg_dump -t kioblog_comment, mysqldump <db> kioblog_comment, "
+            "or a copy of the sqlite file), or inspect/export it directly via "
+            "`python manage.py dbshell`. Once you've backed it up (or don't "
+            "need it), delete the rows - DELETE FROM kioblog_comment; from "
+            "that same dbshell - then re-run migrate."
         )
 
 
