@@ -38,13 +38,21 @@ class DeduplicateSlugsTests(base.BaseTestCase):
         # - this instead proves the wiring itself: `using` reaches both the
         # query and the write, which is what actually fixes reading/writing
         # the "default" alias regardless of which connection is migrating.
+        #
+        # Two rows sharing a slug, not an empty queryset: an empty one never
+        # reaches obj.save() at all, so it could only prove `using` reaches
+        # the *read* - a regression that dropped `using=using` from the
+        # write would still have passed this test.
+        first = MagicMock(slug="dup")
+        second = MagicMock(slug="dup")
         fake_model = MagicMock()
-        fake_model.objects.using.return_value.order_by.return_value = []
+        fake_model.objects.using.return_value.order_by.return_value = [first, second]
         fake_model._meta.get_field.return_value.max_length = 200
 
         deduplicate_slugs(fake_model, using="replica")
 
         fake_model.objects.using.assert_called_once_with("replica")
+        second.save.assert_called_once_with(using="replica", update_fields=["slug"])
 
     def test_keeps_the_first_row_and_renames_the_rest(self) -> None:
         first = models.Category.objects.create(title="one", slug="cat")
