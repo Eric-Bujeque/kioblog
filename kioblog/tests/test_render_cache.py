@@ -104,6 +104,34 @@ class RenderCacheTests(base.BaseTestCase):
         self.assertGreater(fresh.updated, backdated)
         self.assertIn("Partial save heading", fresh.content_html)
 
+    def test_explicitly_empty_update_fields_stays_a_no_op(self) -> None:
+        # Django treats update_fields=[] as "skip the save entirely" (Model.
+        # save()'s own source: `if not update_fields: return`, before the
+        # database is touched at all) - forcing "updated" into it on an
+        # `is not None` check rather than a truthy one would turn that
+        # intentional no-op into a real write of just {"updated"}.
+        before = models.Post.objects.get(pk=self.post.pk).updated
+        self.post.title = "should not be saved"
+        self.post.save(update_fields=[])
+
+        after = models.Post.objects.get(pk=self.post.pk)
+        self.assertEqual(after.updated, before)
+        self.assertNotEqual(after.title, "should not be saved")
+
+    def test_second_read_on_the_same_instance_sees_a_later_in_memory_edit(self) -> None:
+        # hasattr(self, "_rendered") alone only guards the *first* call - a
+        # second content_html read on the SAME instance, after mutating
+        # .content in between, used to keep returning the first render
+        # regardless, since nothing rechecked whether .content had moved.
+        post = models.Post.objects.get(pk=self.post.pk)
+        first_html = post.content_html
+
+        post.content = "# Changed after the first read"
+        second_html = post.content_html
+
+        self.assertNotEqual(first_html, second_html)
+        self.assertIn("Changed after the first read", second_html)
+
     def test_renderer_version_bump_forces_a_fresh_render(self) -> None:
         # A kioblog release that changes render_markdown's output (the
         # code-block markup, Pygments styling, the toc settings, ...) isn't

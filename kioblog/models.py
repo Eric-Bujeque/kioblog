@@ -178,7 +178,14 @@ class Post(models.Model):
         return f"kioblog:post:{self.pk}:render:v{_RENDER_CACHE_VERSION}:{digest}"
 
     def _render(self):
-        if not hasattr(self, "_rendered"):
+        # Re-renders whenever self.content no longer matches what _rendered
+        # was last computed from, not just on the first call - hasattr alone
+        # would let a second read on the SAME instance (post.content_html;
+        # post.content = "..."; post.content_html again) keep returning the
+        # first render, since nothing before this ever rechecked the source
+        # once _rendered existed at all. That's true independently of the
+        # shared cache below - it's this instance's own memoisation.
+        if not hasattr(self, "_rendered") or self._rendered_from != self.content:
             cache_key = self._render_cache_key()
             cached = cache.get(cache_key) if cache_key else None
             if cached is not None:
@@ -199,6 +206,7 @@ class Post(models.Model):
                     # _RENDER_CACHE_TIMEOUT for why that's a real risk on a
                     # Redis-backed cache specifically.
                     cache.set(cache_key, (self._rendered.html, self._rendered.toc), timeout=_RENDER_CACHE_TIMEOUT)
+            self._rendered_from = self.content
         return self._rendered
 
     @property
