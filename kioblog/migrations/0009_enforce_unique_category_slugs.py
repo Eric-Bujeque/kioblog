@@ -18,6 +18,7 @@ at all) and builds each URL from its own slug, so duplicates instead make it
 emit the *same* <loc> more than once.
 """
 
+from django.conf import settings
 from django.db import migrations, models
 
 from kioblog.slugs import deduplicate_slugs
@@ -29,16 +30,25 @@ def deduplicate_category_slugs(apps, schema_editor):
     # regardless of which connection `migrate` is actually targeting - same
     # gap 0007 had for Post, fixed there the same way.
     #
-    # fold=True only on MySQL: Category.slug is public too (every category
-    # page URL is built from it), so case/accent-folding on a case-sensitive
-    # backend (SQLite, PostgreSQL's defaults) would silently rename a live,
-    # distinct, already-working slug like "Foo" for no reason - the real
-    # unique index on those backends would have accepted it unchanged. Same
-    # fix as 0007's for Post.slug - including the same caveat: this is a
-    # vendor-level guess, not the column's actual collation; see
-    # deduplicate_slugs's own `fold` docstring for what that does and
-    # doesn't cover (a deliberately case-sensitive MySQL collation, e.g.).
-    deduplicate_slugs(Category, using=schema_editor.connection.alias, fold=schema_editor.connection.vendor == 'mysql')
+    # fold=True only on MySQL by default: Category.slug is public too (every
+    # category page URL is built from it), so case/accent-folding on a
+    # case-sensitive backend (SQLite, PostgreSQL's defaults) would silently
+    # rename a live, distinct, already-working slug like "Foo" for no reason
+    # - the real unique index on those backends would have accepted it
+    # unchanged. Same fix as 0007's for Post.slug - including the same
+    # caveat: this is a vendor-level guess, not the column's actual
+    # collation; see deduplicate_slugs's own `fold` docstring for what that
+    # does and doesn't cover.
+    #
+    # KIOBLOG_SLUG_FOLD, the same setting 0007 reads, overrides that guess
+    # here too - Copilot caught this migration not reading it at all before
+    # this fix, unlike 0007, which would have left an installation with no
+    # way to override the vendor-only heuristic for Category.slug even after
+    # setting it for Post.slug.
+    fold = getattr(settings, 'KIOBLOG_SLUG_FOLD', None)
+    if fold is None:
+        fold = schema_editor.connection.vendor == 'mysql'
+    deduplicate_slugs(Category, using=schema_editor.connection.alias, fold=fold)
 
 
 class Migration(migrations.Migration):
