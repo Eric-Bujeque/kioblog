@@ -604,3 +604,27 @@ class DeleteCommentMigrationTests(TransactionTestCase):
 
         self.assertIn("not locked against a concurrent writer", buffer.getvalue())
         self.assertIn("maintenance window", buffer.getvalue())
+
+
+class RefuseIfCommentsExistUsingParameterTests(SimpleTestCase):
+    # Copilot finding, real: every test above only ever runs against this
+    # repo's own "default" connection - nothing proves
+    # refuse_if_comments_exist actually checks the alias schema_editor
+    # names, rather than silently defaulting to "default", on a real
+    # multi-database installation. Mirrors
+    # DeduplicateSlugsUsingParameterTests' own using-wiring test elsewhere
+    # in this file: no second real database needed to prove the wiring
+    # itself reaches the query, just mocks standing in for `apps` and
+    # `schema_editor`.
+    def test_using_reaches_the_count_query(self) -> None:
+        module = importlib.import_module("kioblog.migrations.0011_delete_comment")
+        fake_manager = MagicMock()
+        fake_manager.using.return_value.count.return_value = 0
+        fake_apps = MagicMock()
+        fake_apps.get_model.return_value.objects = fake_manager
+        fake_schema_editor = MagicMock()
+        fake_schema_editor.connection.alias = "replica"
+
+        module.refuse_if_comments_exist(fake_apps, fake_schema_editor)
+
+        fake_manager.using.assert_called_once_with("replica")
