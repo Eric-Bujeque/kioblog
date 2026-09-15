@@ -176,10 +176,15 @@ class Post(models.Model):
 
     def _render_cache_key(self):
         # None skips the shared cache entirely, falling back to the
-        # per-instance-only caching below - correct for an unsaved instance
-        # (pk is None) and for one with in-memory changes never written to the
-        # database (self.content, which the hash below is always computed
-        # from, already reflects those - there's nothing stale to serve).
+        # per-instance-only caching below - correct for an unsaved instance,
+        # whether that's because pk is None or (see _state.adding below)
+        # because a pk was assigned by hand without ever actually saving.
+        # A *saved* instance with a dirty in-memory content edit does NOT
+        # take this path - Copilot finding, real, this comment used to claim
+        # otherwise. It still gets a real key below, from the content hash;
+        # that's what makes the edit visible without needing updated to move
+        # (see the next comment) rather than something this None-return
+        # needs to special-case.
         #
         # Deliberately keyed on a hash of content, not on `pk` + `updated`:
         # render_markdown is a pure function of `content` alone, so hashing it
@@ -202,10 +207,14 @@ class Post(models.Model):
             return None
         # (self.content or ""), not self.content directly: render_markdown()
         # itself already treats None as "" (`md.convert(text or "")`), so a
-        # saved instance with an in-memory content = None - or a manually
-        # assigned pk with no content set yet - should hash to the same key
-        # as an empty string renders to, not raise AttributeError on
-        # .encode() before ever reaching render_markdown at all.
+        # *saved* instance whose content was changed to None in memory
+        # (never re-saved) should hash to the same key as an empty string
+        # renders to, not raise AttributeError on .encode() before ever
+        # reaching render_markdown at all. A manually-assigned pk on an
+        # unsaved instance never reaches this line in the first place - the
+        # _state.adding guard above already returns None for it; Copilot
+        # finding, real, this comment used to list that as a case handled
+        # here too.
         digest = hashlib.sha256((self.content or "").encode("utf-8")).hexdigest()[:16]
         return f"kioblog:post:{self.pk}:render:v{_RENDER_CACHE_VERSION}:{digest}"
 
