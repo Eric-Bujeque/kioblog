@@ -167,6 +167,29 @@ class RenderCacheTests(base.BaseTestCase):
         fresh = models.Post.objects.get(pk=self.post.pk)
         self.assertGreater(fresh.updated, backdated)
 
+    def test_a_deferred_instance_saved_to_a_different_alias_is_not_field_restricted(self) -> None:
+        # save(using="other") on a deferred instance must NOT take the
+        # "restrict to loaded fields" shortcut above - Django's own
+        # condition for it (base.py) is `using == self._state.db`, not just
+        # "deferred fields exist". Skipping that check would silently write
+        # only the loaded fields (plus "updated") to the target alias,
+        # leaving every field the instance never loaded (title, slug, ...)
+        # untouched there instead of a full row - exactly the kind of
+        # cross-database copy Django's own guard exists to protect against.
+        #
+        # Patches django.db.models.Model.save (what super().save() resolves
+        # to) rather than exercising a real second alias - this repo's dev
+        # settings only configure "default", and the point here is proving
+        # what update_fields Post.save() computes and hands upward, not
+        # exercising a real multi-database write.
+        deferred = models.Post.objects.only("content").get(pk=self.post.pk)
+        deferred.content = "# Cross-database save"
+
+        with patch("django.db.models.Model.save") as mocked_save:
+            deferred.save(using="other")
+
+        mocked_save.assert_called_once_with(force_insert=False, force_update=False, using="other", update_fields=None)
+
     def test_none_content_does_not_crash_the_cache_key(self) -> None:
         # render_markdown() already treats None as "" (md.convert(text or
         # "")) - the cache key needs to hash to the same thing, not raise
