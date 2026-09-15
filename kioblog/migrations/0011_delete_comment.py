@@ -48,6 +48,20 @@ def refuse_if_comments_exist(apps, schema_editor):
             "need it), delete the rows - DELETE FROM kioblog_comment; from "
             "that same dbshell - then re-run migrate."
         )
+    # Copilot finding: the module docstring explains the TOCTOU race below
+    # (count() isn't locked), but that warning was only ever visible to
+    # someone who happened to read this file - not to whoever actually runs
+    # `migrate` and watches it succeed. Printed here, on the path that's
+    # about to drop the table, so the precondition this migration depends on
+    # (nothing else writing to Comment) is stated at the moment it matters,
+    # not just documented somewhere a successful run never surfaces.
+    print(
+        "    kioblog 0011_delete_comment: preflight check passed (0 Comment "
+        "rows) - proceeding to drop the table. This check is not locked "
+        "against a concurrent writer; if anything else could still be "
+        "writing to Comment right now, stop and re-run this in a "
+        "maintenance window instead."
+    )
 
 
 class Migration(migrations.Migration):
