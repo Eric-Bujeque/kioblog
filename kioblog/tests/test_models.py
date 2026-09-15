@@ -93,6 +93,17 @@ class KioblogModels(base.BaseTestCase):
                     title="duplicate", content="x", user=self.user, category=self.category, slug=self.post.slug
                 )
 
+    def test_category_slug_must_be_unique(self) -> None:
+        # Copilot finding, real: this comment used to say a duplicate
+        # "doesn't crash" - true before migration 0009 added unique=True
+        # (see the Category.slug field comment for what could go wrong
+        # then: HomeView/sitemap resolving to, or emitting, the wrong
+        # category), false now, directly contradicting the assertion right
+        # below it. This test verifies the constraint 0009 added.
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                models.Category.objects.create(title="duplicate", slug=self.category.slug)
+
     def test_category_post_count_ignores_drafts(self) -> None:
         models.Post.objects.create(
             title="draft", content="x", user=self.user, category=self.category, slug="draft", draft=True
