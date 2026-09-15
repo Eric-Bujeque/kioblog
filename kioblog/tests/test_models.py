@@ -1,3 +1,4 @@
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from kioblog import models
@@ -82,6 +83,15 @@ class KioblogModels(base.BaseTestCase):
         related = self.post.related_posts()
         self.assertIn(sibling, related)
         self.assertNotIn(self.post, related)
+
+    def test_post_slug_must_be_unique(self) -> None:
+        # Without this, two posts sharing a slug make PostView 500 instead of
+        # serving either one - see migration 0007 for the full mechanism.
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                models.Post.objects.create(
+                    title="duplicate", content="x", user=self.user, category=self.category, slug=self.post.slug
+                )
 
     def test_category_post_count_ignores_drafts(self) -> None:
         models.Post.objects.create(
