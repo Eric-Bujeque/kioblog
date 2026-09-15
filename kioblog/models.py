@@ -3,7 +3,7 @@ from html import unescape
 
 from django.conf import settings
 from django.db import models, router
-from django.db.models.signals import m2m_changed
+from django.db.models.signals import m2m_changed, post_save, pre_delete
 from django.utils import timezone
 from markdownx.models import MarkdownxField
 
@@ -201,7 +201,7 @@ class Post(models.Model):
         return recent_posts[:5]
 
 
-def _bump_updated_on_tag_change(sender, instance, action, reverse, pk_set, **kwargs):
+def _bump_updated_on_tag_change(sender, instance, action, reverse, using, pk_set, **kwargs):
     # Copilot finding, real: auto_now only runs when Post.save() actually
     # executes, but ManyToManyField.add()/remove()/clear() write straight to
     # the through table and never call save() at all - a post's tags are
@@ -232,36 +232,67 @@ def _bump_updated_on_tag_change(sender, instance, action, reverse, pk_set, **kwa
     # this field's related_name="posts"): `instance` is the Tag, not a
     # Post, and Tag has no `updated` field at all - naively reusing the
     # forward branch's instance.save() would raise. Copilot finding, real:
-    # the affected Posts (named by `pk_set` for add/remove) still need
-    # their `updated` bumped, the same as the forward direction - a post's
+    # the affected Posts (named by pk_set for add/remove) still need their
+    # `updated` bumped, the same as the forward direction - a post's
     # rendered tags changed here too, just reached from the Tag side.
     #
-    # pk_set is documented as None for post_clear specifically (the
-    # through rows are already gone by the time that signal fires), so the
-    # affected pks are captured at pre_clear instead, while still
-    # queryable, and stashed on the Tag instance for post_clear to read -
-    # the two fire back-to-back in the same call, so the instance is still
-    # the same live object both times.
+    # `using`, not the default manager, for every query below: m2m_changed
+    # supplies the alias the relation change is actually running against
+    # (tag.posts.using("replica").add(...)) - Copilot finding, real; using
+    # the default manager instead could bump `updated` on the wrong
+    # database, or not at all, for a non-default alias.
     if action == "pre_clear":
-        instance._kioblog_pending_clear_post_pks = set(instance.posts.values_list("pk", flat=True))
-        return
+        # A single UPDATE ... WHERE tags = instance, not a Python-side pk
+        # set captured here and bulk-updated at post_clear: pk_set is
+        # documented as None for post_clear specifically (the through rows
+        # are already gone by then), and materializing every affected pk
+        # into memory first doesn't scale to a tag used by many posts -
+        # Copilot finding, real. Run while the through rows this filters on
+        # still exist (pre_clear, before the delete), and safe to run here
+        # rather than at post_clear: Django's own ManyRelatedManager.clear()
+        # wraps pre_clear, the through-row delete, and post_clear in one
+        # transaction.atomic(using=db) - if clear() goes on to fail, this
+        # update rolls back with it, the same as the forward direction's
+        # "only bump on the post_* signals" reasoning above achieves by
+        # ordering instead.
+        Post.objects.using(using).filter(tags=instance).update(updated=timezone.now())
+    elif action in ("post_add", "post_remove") and pk_set:
+        Post.objects.using(using).filter(pk__in=pk_set).update(updated=timezone.now())
 
-    if action in ("post_add", "post_remove"):
-        post_pks = pk_set
-    elif action == "post_clear":
-        post_pks = getattr(instance, "_kioblog_pending_clear_post_pks", None)
-    else:
-        return
 
-    if post_pks:
-        # .update(), not a per-instance save() loop: a heavily-tagged Tag's
-        # clear() can affect many posts at once. .update() bypasses
-        # auto_now entirely (it isn't Model.save()), so the new value is
-        # set explicitly here rather than relying on the field to fire it.
-        Post.objects.filter(pk__in=post_pks).update(updated=timezone.now())
+def _bump_updated_on_tag_edit(sender, instance, created, using, **kwargs):
+    # A Tag's title/slug is rendered on every post that has it (the tag
+    # links in post.html) - editing either changes those posts' public
+    # pages without ever touching Post itself, the same kind of gap
+    # m2m_changed exists to close for adding/removing a tag from a post.
+    # Copilot finding, real.
+    #
+    # `not created`: a brand-new tag can't be attached to any post yet at
+    # the moment this fires - nothing could reference it before it existed
+    # - so there's nothing to bump; skip the query entirely rather than
+    # running a no-op UPDATE on every tag creation.
+    if not created:
+        Post.objects.using(using).filter(tags=instance).update(updated=timezone.now())
+
+
+def _bump_updated_on_tag_delete(sender, instance, using, **kwargs):
+    # Deleting a Tag removes it from every post's rendered tag list too,
+    # but that happens via Django's own cascade-delete of the through rows,
+    # not through m2m_changed - that signal only fires for add()/remove()/
+    # clear()/set() calls on a live manager, never for a model deletion
+    # cascading into the through table. Copilot finding, real.
+    #
+    # pre_delete, not post_delete: by post_delete the through rows (and so
+    # this filter) are already gone. Model.delete() wraps pre_delete, the
+    # cascade, and post_delete in one transaction, same reasoning as
+    # pre_clear above for why running the update here is still safe if the
+    # delete itself goes on to fail.
+    Post.objects.using(using).filter(tags=instance).update(updated=timezone.now())
 
 
 m2m_changed.connect(_bump_updated_on_tag_change, sender=Post.tags.through)
+post_save.connect(_bump_updated_on_tag_edit, sender=Tag)
+pre_delete.connect(_bump_updated_on_tag_delete, sender=Tag)
 
 
 class Comment(models.Model):

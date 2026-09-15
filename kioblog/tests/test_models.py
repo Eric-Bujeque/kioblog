@@ -224,8 +224,8 @@ class KioblogModels(base.BaseTestCase):
 
     def test_clearing_a_tags_posts_bumps_updated_on_all_of_them(self) -> None:
         # post_clear's pk_set is None (Django's own m2m_changed contract) -
-        # the affected posts have to be captured at pre_clear, before the
-        # through rows are gone, or this silently affects nobody.
+        # the affected posts are bumped at pre_clear instead, while the
+        # through rows they're matched through still exist.
         tag = models.Tag.objects.create(title="reverse clear", slug="reverse-clear")
         other = models.Post.objects.create(
             title="other", content="x", user=self.user, category=self.category, slug="other-tagged"
@@ -240,3 +240,46 @@ class KioblogModels(base.BaseTestCase):
         other.refresh_from_db()
         self.assertGreater(self.post.updated, backdated)
         self.assertGreater(other.updated, backdated)
+
+    def test_editing_a_tags_title_bumps_updated_on_its_posts(self) -> None:
+        # Copilot finding, real: a Tag's title/slug is rendered on every
+        # post that has it (the tag links in post.html) - editing either
+        # changes those posts' public pages without Post.save() ever
+        # running, the same kind of gap m2m_changed closes for adding or
+        # removing a tag from a post.
+        tag = models.Tag.objects.create(title="editable", slug="editable")
+        tag.posts.add(self.post)
+        backdated = self._backdate_post()
+
+        tag.title = "edited title"
+        tag.save()
+
+        self.post.refresh_from_db()
+        self.assertGreater(self.post.updated, backdated)
+
+    def test_creating_a_tag_does_not_touch_any_post(self) -> None:
+        # A brand-new tag can't be attached to any post yet at the moment
+        # its own post_save fires - nothing could reference it before it
+        # existed - so creating one must not bump anything.
+        backdated = self._backdate_post()
+
+        models.Tag.objects.create(title="brand new", slug="brand-new")
+
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.updated, backdated)
+
+    def test_deleting_a_tag_bumps_updated_on_its_posts(self) -> None:
+        # Copilot finding, real: deleting a Tag removes it from every
+        # post's rendered tag list too, via Django's own cascade-delete of
+        # the through rows - but that never fires m2m_changed (that signal
+        # only fires for add()/remove()/clear()/set() calls on a live
+        # manager, not a model deletion cascading into the through table),
+        # so without its own receiver this left `updated` stale.
+        tag = models.Tag.objects.create(title="deletable", slug="deletable")
+        tag.posts.add(self.post)
+        backdated = self._backdate_post()
+
+        tag.delete()
+
+        self.post.refresh_from_db()
+        self.assertGreater(self.post.updated, backdated)
