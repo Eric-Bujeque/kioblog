@@ -17,7 +17,9 @@ there is no longer any model the ORM will let collide outside a reversed
 migration state like this one.
 """
 
+import contextlib
 import importlib
+import io
 from unittest.mock import MagicMock
 
 from django.db import connection
@@ -573,3 +575,22 @@ class DeleteCommentMigrationTests(TransactionTestCase):
         # would pass it just as well while leaving kioblog_comment sitting in
         # deployed databases, so this asks the database directly too.
         self.assertNotIn("kioblog_comment", connection.introspection.table_names())
+
+    def test_successful_migration_prints_the_race_window_caution(self) -> None:
+        # Copilot finding: the module docstring documents the TOCTOU race
+        # (count() isn't locked against a concurrent writer), but that was
+        # only ever visible to someone reading this file - not to whoever
+        # actually runs `migrate` and watches the preflight check pass. This
+        # proves the caution is printed on exactly that path, not just
+        # written down somewhere a successful run never surfaces.
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            executor.migrate([self.migrate_to])
+
+        self.assertIn("not locked against a concurrent writer", buffer.getvalue())
+        self.assertIn("maintenance window", buffer.getvalue())
