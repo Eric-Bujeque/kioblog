@@ -9,13 +9,14 @@ gone; the same scenarios (including the "don't rename onto an already-taken
 slug" case that caught a real bug in the helper before it shipped) now live
 in kioblog.tests.test_migrations, exercised against this migration directly.
 
-Doesn't 500 the way a duplicate Post.slug does, but it's still wrong two
-different ways. HomeView resolves a URL's slug via
-Category.objects.filter(slug=...).first(), so a category page can silently
-render a *different* category than the one its own URL names. sitemap.py's
-CategorySitemap enumerates every Category row directly (no .filter().first()
-at all) and builds each URL from its own slug, so duplicates instead make it
-emit the *same* <loc> more than once.
+A duplicate here never 500'd the way one did for Post.slug, but was still
+wrong two different ways before this migration. HomeView resolves a URL's
+slug via Category.objects.filter(slug=...).first(), so a category page
+could silently render a *different* category than the one its own URL
+named. sitemap.py's CategorySitemap enumerates every Category row directly
+(no .filter().first() at all) and builds each URL from its own slug, so
+duplicates instead made it emit the *same* <loc> more than once. This
+migration's own AlterField below closes both, going forward.
 """
 
 from django.conf import settings

@@ -94,9 +94,12 @@ class KioblogModels(base.BaseTestCase):
                 )
 
     def test_category_slug_must_be_unique(self) -> None:
-        # Doesn't crash the way a duplicate Post.slug does (HomeView/sitemap
-        # resolve via .filter(slug=...).first()), but a category URL could
-        # silently route to a different category than the one it linked to.
+        # Copilot finding, real: this comment used to say a duplicate
+        # "doesn't crash" - true before migration 0009 added unique=True
+        # (see the Category.slug field comment for what could go wrong
+        # then: HomeView/sitemap resolving to, or emitting, the wrong
+        # category), false now, directly contradicting the assertion right
+        # below it. This test verifies the constraint 0009 added.
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 models.Category.objects.create(title="duplicate", slug=self.category.slug)
