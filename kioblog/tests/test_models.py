@@ -196,6 +196,33 @@ class KioblogModels(base.BaseTestCase):
         self.post.refresh_from_db()
         self.assertGreater(self.post.updated, backdated)
 
+    def test_readding_an_already_present_tag_does_not_bump_updated(self) -> None:
+        # Copilot finding, real: Django still fires post_add for a re-add
+        # that changed nothing - confirmed against its own _add_items
+        # source, which sends pk_set as only the ids that were actually
+        # *missing* beforehand, empty for this case. Bumping unconditionally
+        # would move the sitemap's lastmod for a page that didn't change.
+        tag = models.Tag.objects.create(title="already there", slug="already-there")
+        self.post.tags.add(tag)
+        backdated = self._backdate_post()
+
+        self.post.tags.add(tag)
+
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.updated, backdated)
+
+    def test_clearing_an_already_tagless_post_does_not_bump_updated(self) -> None:
+        # Copilot finding, real: post.tags.clear() on a post with no tags
+        # is a genuine no-op - confirmed nothing was tagged, so nothing
+        # should move.
+        backdated = self._backdate_post()
+        self.assertFalse(self.post.tags.exists())
+
+        self.post.tags.clear()
+
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.updated, backdated)
+
     def test_adding_a_post_from_the_reverse_tag_manager_bumps_updated(self) -> None:
         # The same m2m_changed signal also fires for the reverse direction
         # (some_tag.posts.add(post), via the M2M's related_name="posts") -

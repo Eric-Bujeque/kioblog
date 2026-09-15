@@ -230,35 +230,7 @@ def _bump_updated_on_tag_change(sender, instance, action, reverse, using, pk_set
         # actually ran against, matching the reverse branches below - Copilot
         # finding, real, for a router that could route the through table
         # differently than a bare Post instance.
-        if action == "pre_clear":
-            # Copilot finding, real: post.tags.clear() on a post with no
-            # tags is a genuine no-op, but bumping unconditionally on
-            # post_clear (as this used to) moved `updated` - and so the
-            # sitemap's lastmod - for a page that didn't actually change.
-            # Checked here, before the through rows are gone, the same
-            # single-query approach as the reverse direction's own
-            # pre_clear handling below: a no-op (0 rows matched) when there
-            # was nothing to clear.
-            Post.objects.using(using).filter(pk=instance.pk, tags__isnull=False).update(updated=timezone.now())
-        elif action == "post_add":
-            # Guarded on pk_set, unlike post_remove below: Django's own
-            # _add_items sends pk_set as the target ids that were actually
-            # *missing* before this call (confirmed against Django's
-            # source) - re-adding an already-present tag fires post_add
-            # with an empty pk_set, a genuine no-op this skips bumping for.
-            if pk_set:
-                instance.save(using=using, update_fields=["updated"])
-        elif action == "post_remove":
-            # NOT guarded on pk_set the way post_add is above: Django's own
-            # _remove_items sends pk_set as the *requested* ids to remove,
-            # not the ones actually found and deleted (confirmed against
-            # Django's source) - it stays non-empty even for a genuine
-            # no-op remove (a tag that was never attached to begin with).
-            # Left unguarded rather than chasing that precisely, which
-            # would need the same pre_remove-capture-and-diff complexity as
-            # pre_clear above, for a rare, low-consequence edge case: an
-            # extra lastmod bump for a removal that changed nothing, not a
-            # correctness bug the way a *missed* edit would be.
+        if action in ("post_add", "post_remove", "post_clear"):
             instance.save(using=using, update_fields=["updated"])
         return
 
