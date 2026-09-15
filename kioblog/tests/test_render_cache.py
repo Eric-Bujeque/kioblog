@@ -118,6 +118,62 @@ class RenderCacheTests(base.BaseTestCase):
         self.assertEqual(after.updated, before)
         self.assertNotEqual(after.title, "should not be saved")
 
+    def test_an_empty_generator_also_stays_a_no_op(self) -> None:
+        # A generator is a truthy *object* even when it would yield nothing
+        # once consumed - unlike a list or set, checking `if update_fields:`
+        # on the raw generator can't tell "empty" from "has items" without
+        # materializing it first. Same contract as the list case above, a
+        # different way to reach it.
+        before = models.Post.objects.get(pk=self.post.pk).updated
+        self.post.title = "should not be saved"
+        self.post.save(update_fields=(name for name in ()))
+
+        after = models.Post.objects.get(pk=self.post.pk)
+        self.assertEqual(after.updated, before)
+        self.assertNotEqual(after.title, "should not be saved")
+
+    def test_update_fields_passed_positionally_still_bumps_updated(self) -> None:
+        # Model.save()'s real signature is save(force_insert, force_update,
+        # using, update_fields) - update_fields can be passed positionally,
+        # not only as a keyword. Reading it exclusively from kwargs would let
+        # a positional call skip this override, and the partial save it
+        # requested, entirely.
+        backdated = timezone.now() - timezone.timedelta(days=1)
+        models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
+
+        stale = models.Post.objects.get(pk=self.post.pk)
+        stale.content = "# Positional update_fields"
+        stale.save(False, False, None, ["content"])
+
+        fresh = models.Post.objects.get(pk=self.post.pk)
+        self.assertGreater(fresh.updated, backdated)
+
+    def test_a_deferred_instances_implicit_save_still_bumps_updated(self) -> None:
+        # Post.objects.only("content").get(...); post.content = ...;
+        # post.save() - no explicit update_fields at all. Django's own
+        # save() then auto-restricts the write to the fields that were
+        # actually *loaded* (a deferred-instance optimization, confirmed
+        # against Django 3.2's own source) - "updated" was never among them,
+        # so without handling this case specifically it's silently excluded,
+        # the same staleness as an explicit partial save reaches without the
+        # caller ever naming update_fields themselves.
+        backdated = timezone.now() - timezone.timedelta(days=1)
+        models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
+
+        deferred = models.Post.objects.only("content").get(pk=self.post.pk)
+        deferred.content = "# Deferred instance save"
+        deferred.save()
+
+        fresh = models.Post.objects.get(pk=self.post.pk)
+        self.assertGreater(fresh.updated, backdated)
+
+    def test_none_content_does_not_crash_the_cache_key(self) -> None:
+        # render_markdown() already treats None as "" (md.convert(text or
+        # "")) - the cache key needs to hash to the same thing, not raise
+        # AttributeError on .encode() before ever reaching render_markdown.
+        unsaved = models.Post(pk=999999, title="draft", content=None, user=self.user, category=self.category)
+        self.assertEqual(unsaved.content_html, "")
+
     def test_second_read_on_the_same_instance_sees_a_later_in_memory_edit(self) -> None:
         # hasattr(self, "_rendered") alone only guards the *first* call - a
         # second content_html read on the SAME instance, after mutating

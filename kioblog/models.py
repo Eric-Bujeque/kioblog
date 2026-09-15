@@ -129,6 +129,15 @@ class Post(models.Model):
         # router whose answer isn't stable across calls.
         using = using or router.db_for_write(self.__class__, instance=self)
         if update_fields is not None:
+            # Materialized before checking truthiness, not checked on the
+            # raw argument: an update_fields that's an iterable other than a
+            # list/set/tuple - a generator, for instance - is a truthy
+            # *object* even when it would yield nothing once consumed, so
+            # `if update_fields:` on the raw value would still add "updated"
+            # and turn Django's own empty-iterable no-op into a real write.
+            # Materializing once up front makes truthiness reflect whether
+            # it's *actually* empty, for any iterable type, the same way it
+            # already correctly does for a plain list or set.
             update_fields = set(update_fields)
             if update_fields:
                 update_fields.add("updated")
@@ -174,7 +183,13 @@ class Post(models.Model):
         # never saved (updated wouldn't move, but content already has).
         if self.pk is None:
             return None
-        digest = hashlib.sha256(self.content.encode("utf-8")).hexdigest()[:16]
+        # (self.content or ""), not self.content directly: render_markdown()
+        # itself already treats None as "" (`md.convert(text or "")`), so a
+        # saved instance with an in-memory content = None - or a manually
+        # assigned pk with no content set yet - should hash to the same key
+        # as an empty string renders to, not raise AttributeError on
+        # .encode() before ever reaching render_markdown at all.
+        digest = hashlib.sha256((self.content or "").encode("utf-8")).hexdigest()[:16]
         return f"kioblog:post:{self.pk}:render:v{_RENDER_CACHE_VERSION}:{digest}"
 
     def _render(self):
