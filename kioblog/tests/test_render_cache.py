@@ -190,6 +190,30 @@ class RenderCacheTests(base.BaseTestCase):
 
         mocked_save.assert_called_once_with(force_insert=False, force_update=False, using="other", update_fields=None)
 
+    def test_using_is_resolved_through_the_router_only_once(self) -> None:
+        # Copilot finding, real: `using` used to be resolved through the
+        # router only for the deferred-field comparison above, then handed
+        # to super().save() unresolved (using=None if the caller never
+        # passed one) - which resolves it itself, a second time, internally.
+        # A router whose db_for_write() isn't stable across calls (a
+        # round-robin router over read replicas, for instance) could then
+        # decide the shortcut against one alias while the actual write goes
+        # to a different one it returned on the second call.
+        #
+        # Proven by call count, not a second real database (this repo's dev
+        # settings only configure "default"): resolving `using` once, up
+        # front, and passing that same value through to super().save()
+        # means Django's own internal `using = using or db_for_write(...)`
+        # short-circuits on the already-truthy value - db_for_write is
+        # never reached a second time at all.
+        deferred = models.Post.objects.only("content").get(pk=self.post.pk)
+        deferred.content = "# Router consistency"
+
+        with patch("kioblog.models.router.db_for_write", return_value="default") as mocked_router:
+            deferred.save()
+
+        mocked_router.assert_called_once()
+
     def test_none_content_does_not_crash_the_cache_key(self) -> None:
         # render_markdown() already treats None as "" (md.convert(text or
         # "")) - the cache key needs to hash to the same thing, not raise
@@ -251,3 +275,46 @@ class RenderCacheTests(base.BaseTestCase):
 
         mocked_get.assert_not_called()
         mocked_set.assert_not_called()
+
+    def test_manually_assigned_pk_on_an_unsaved_post_never_touches_the_cache(self) -> None:
+        # Copilot finding, real: `self.pk is None` alone doesn't mean
+        # "unsaved" - a Post constructed with an explicit pk (as
+        # test_manually_assigned_pk_on_an_unsaved_post_does_not_crash, above,
+        # already covers for the crash case) has self.pk set but is still
+        # unsaved (self._state.adding stays True until a real save()
+        # completes). Without checking _state.adding too, this preview path
+        # reached the shared cache under a real-looking database key -
+        # caching content that was never actually persisted under that pk,
+        # and violating the same "unsaved previews never touch the shared
+        # cache" contract test_unsaved_post_still_renders_without_touching_
+        # the_cache proves for the no-pk case just above.
+        unsaved = models.Post(
+            pk=999999, title="draft", content="# Manual pk preview", user=self.user, category=self.category
+        )
+        self.assertIsNotNone(unsaved.pk)
+        self.assertTrue(unsaved._state.adding)
+
+        with patch("kioblog.models.cache.get") as mocked_get, patch("kioblog.models.cache.set") as mocked_set:
+            self.assertIn("Manual pk preview", unsaved.content_html)
+
+        mocked_get.assert_not_called()
+        mocked_set.assert_not_called()
+
+    def test_cache_get_failure_falls_back_to_a_fresh_render(self) -> None:
+        # Copilot finding, real: this cache only exists to skip re-rendering
+        # - a backend outage (Redis/Memcached down, a transient network
+        # error, ...) must not turn "post pages unavailable" into a side
+        # effect of "cache unavailable". Nothing before this caught an
+        # exception from cache.get(), so it would have propagated straight
+        # out of content_html and 500'd the page.
+        with patch("kioblog.models.cache.get", side_effect=ConnectionError("cache backend unreachable")):
+            html = models.Post.objects.get(pk=self.post.pk).content_html
+        self.assertTrue(html)
+
+    def test_cache_set_failure_does_not_crash_the_render(self) -> None:
+        # Same reasoning as the cache.get case above, for the write side:
+        # render_markdown() has already succeeded by the time cache.set()
+        # would run, so a write failure there must not discard that result.
+        with patch("kioblog.models.cache.set", side_effect=ConnectionError("cache backend unreachable")):
+            html = models.Post.objects.get(pk=self.post.pk).content_html
+        self.assertTrue(html)

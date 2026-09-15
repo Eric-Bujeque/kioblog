@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 from html import unescape
 
@@ -10,6 +11,8 @@ from django.utils import timezone
 from markdownx.models import MarkdownxField
 
 from kioblog.markdown.render import RenderedContent, render_markdown
+
+logger = logging.getLogger(__name__)
 
 # Bump when render_markdown's output changes shape (code_chrome.py markup,
 # pygments_onedark.py styling, the toc extension's settings, ...) - the cache
@@ -125,8 +128,12 @@ class Post(models.Model):
         # `using` resolved through the router exactly once, here, and reused
         # for both the deferred-field decision below and the super().save()
         # call at the end - not left as None for Django to resolve a second
-        # time on its own, which could hand back a different alias for a
-        # router whose answer isn't stable across calls.
+        # time on its own. Copilot finding, real: a router whose
+        # db_for_write() isn't deterministic across calls (round-robin
+        # across read replicas, for instance) could otherwise hand back a
+        # different alias the second time, so the deferred-field shortcut
+        # would be decided against one database while the actual write goes
+        # to another.
         using = using or router.db_for_write(self.__class__, instance=self)
         if update_fields is not None:
             # Materialized before checking truthiness, not checked on the
@@ -181,7 +188,17 @@ class Post(models.Model):
         # a manually-assigned pk on an unsaved instance (updated is still None
         # there; content never is) and an in-memory content edit that was
         # never saved (updated wouldn't move, but content already has).
-        if self.pk is None:
+        #
+        # `self._state.adding`, not just `self.pk is None`: a Post
+        # constructed with an explicit pk (Post(pk=999999, ...)) is still
+        # unsaved - `_state.adding` stays True until a real save() completes
+        # - but `self.pk` is already set, so the `pk is None` check alone let
+        # this preview path reach the shared cache under a real-looking
+        # database key. Copilot finding, real: that both pollutes the shared
+        # cache with content that was never actually persisted under that
+        # pk, and violates the "unsaved previews never touch the shared
+        # cache" behavior the rest of this method and its tests assume.
+        if self.pk is None or self._state.adding:
             return None
         # (self.content or ""), not self.content directly: render_markdown()
         # itself already treats None as "" (`md.convert(text or "")`), so a
@@ -202,7 +219,20 @@ class Post(models.Model):
         # shared cache below - it's this instance's own memoisation.
         if not hasattr(self, "_rendered") or self._rendered_from != self.content:
             cache_key = self._render_cache_key()
-            cached = cache.get(cache_key) if cache_key else None
+            # Best-effort, not a hard dependency: this cache only exists to
+            # skip re-rendering, so a backend outage (Redis/Memcached down,
+            # a transient network error, ...) must not turn "post pages
+            # unavailable" into a side effect of "cache unavailable" -
+            # confirmed as a real gap, not theoretical: nothing before this
+            # caught an exception from cache.get()/cache.set(), so either
+            # call raising would propagate straight out of content_html and
+            # 500 the page, after render_markdown() had already succeeded.
+            cached = None
+            if cache_key:
+                try:
+                    cached = cache.get(cache_key)
+                except Exception:
+                    logger.warning("kioblog: cache.get failed for %s, rendering fresh", cache_key, exc_info=True)
             if cached is not None:
                 # RenderedContent (a str subclass carrying .html/.toc as
                 # extra attributes) isn't picklable as-is - its __new__
@@ -220,7 +250,10 @@ class Post(models.Model):
                     # every post permanently cached - see
                     # _RENDER_CACHE_TIMEOUT for why that's a real risk on a
                     # Redis-backed cache specifically.
-                    cache.set(cache_key, (self._rendered.html, self._rendered.toc), timeout=_RENDER_CACHE_TIMEOUT)
+                    try:
+                        cache.set(cache_key, (self._rendered.html, self._rendered.toc), timeout=_RENDER_CACHE_TIMEOUT)
+                    except Exception:
+                        logger.warning("kioblog: cache.set failed for %s, serving uncached", cache_key, exc_info=True)
             self._rendered_from = self.content
         return self._rendered
 
