@@ -28,7 +28,8 @@ from django.db import migrations
 
 def refuse_if_comments_exist(apps, schema_editor):
     Comment = apps.get_model('kioblog', 'Comment')
-    count = Comment.objects.using(schema_editor.connection.alias).count()
+    alias = schema_editor.connection.alias
+    count = Comment.objects.using(alias).count()
     if count:
         # Deliberately NOT "run dumpdata kioblog.Comment" or "delete via the
         # ORM from a shell": by the time an operator reads this, the kioblog
@@ -37,17 +38,27 @@ def refuse_if_comments_exist(apps, schema_editor):
         # advice that goes through the ORM (dumpdata, `from kioblog.models
         # import Comment`) fails too. Only database-level guidance survives
         # that.
+        #
+        # `alias` named explicitly in the message, and passed to dbshell via
+        # --database (a real dbshell option, confirmed against Django's own
+        # command - not left as a guess): an operator running
+        # `migrate --database=replica` on a multi-database installation
+        # would otherwise get advice that silently defaults to "default",
+        # not the alias this check actually ran against - backing up or
+        # inspecting the wrong database entirely. Copilot finding, real.
         raise RuntimeError(
-            f"Refusing to migrate: {count} Comment row(s) still exist, and this "
-            "migration deletes the Comment table entirely. This version of "
-            "kioblog no longer has a Comment model for the ORM to reach - back "
-            "the table up at the database level first, with your engine's own "
-            "tool (pg_dump -t kioblog_comment your_database_name > backup.sql, "
-            "mysqldump your_database_name kioblog_comment > backup.sql, "
-            "or a copy of the sqlite file), or inspect/export it directly via "
-            "`python manage.py dbshell`. Once you've backed it up (or don't "
-            "need it), delete the rows - DELETE FROM kioblog_comment; from "
-            "that same dbshell - then re-run migrate."
+            f"Refusing to migrate: {count} Comment row(s) still exist on the "
+            f"'{alias}' database, and this migration deletes the Comment "
+            "table entirely. This version of kioblog no longer has a Comment "
+            "model for the ORM to reach - back up that table at the database "
+            "level first, with your engine's own tool against the "
+            f"'{alias}' connection (pg_dump -t kioblog_comment "
+            f"your_database_name > backup.sql, mysqldump your_database_name "
+            "kioblog_comment > backup.sql, or a copy of the sqlite file), or "
+            f"inspect/export it directly via `python manage.py dbshell "
+            f"--database={alias}`. Once you've backed it up (or don't need "
+            "it), delete the rows - DELETE FROM kioblog_comment; from that "
+            "same dbshell - then re-run migrate."
         )
     # Copilot finding: the module docstring explains the TOCTOU race below
     # (count() isn't locked), but that warning was only ever visible to

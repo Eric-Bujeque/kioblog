@@ -538,7 +538,7 @@ class DeleteCommentMigrationTests(TransactionTestCase):
         user = User.objects.create(username="migrationtestuser")
         category = Category.objects.create(title="cat", slug="cat")
         post = Post.objects.create(title="T", content="x", user=user, category=category, slug="s")
-        Comment.objects.create(username="commenter", content="hi", post=post, email="a@b.com")
+        comment = Comment.objects.create(username="commenter", content="hi", post=post, email="a@b.com")
 
         executor = MigrationExecutor(connection)
         executor.loader.build_graph()
@@ -551,6 +551,16 @@ class DeleteCommentMigrationTests(TransactionTestCase):
         # work against - it has to name the real table so a database-level
         # tool can still find it.
         self.assertIn("kioblog_comment", str(cm.exception))
+
+        # Copilot finding, real: everything above only proved 0011 wasn't
+        # *recorded* as applied - not that the row this whole guard exists
+        # to protect actually survived. A regression that deleted it before
+        # raising would still pass every assertion above; tearDown() would
+        # then quietly hide the data loss by cleaning up whatever's left.
+        # Queried through the same historical Comment (not the live model,
+        # which this installed version no longer has), against the same
+        # alias the migration itself checked.
+        self.assertTrue(Comment.objects.using(connection.alias).filter(pk=comment.pk).exists())
 
         # The migration's own transaction rolled back, so 0011 was never
         # recorded as applied.
