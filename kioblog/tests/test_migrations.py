@@ -312,6 +312,44 @@ class DeduplicateCategorySlugsMigrationTests(TransactionTestCase):
         self.assertEqual(len(slugs), len(set(slugs)))
 
 
+class CategorySlugFoldSettingOverrideMigrationTests(TransactionTestCase):
+    # Mirrors PostSlugFoldSettingOverrideMigrationTests above, for 0009.
+    # Copilot finding, real: 0009 never read KIOBLOG_SLUG_FOLD at all before
+    # this fix - an installation that set it to override 0007's vendor-only
+    # guess for Post.slug had no way to do the same for Category.slug, even
+    # though both migrations exist for exactly the same reason.
+    migrate_from = ("kioblog", "0008_post_updated")
+    migrate_to = ("kioblog", "0009_enforce_unique_category_slugs")
+
+    def tearDown(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    @override_settings(KIOBLOG_SLUG_FOLD=True)
+    def test_setting_true_forces_folding_even_on_a_case_sensitive_backend(self) -> None:
+        # This repo's real connection is SQLite - the migration's own vendor
+        # check alone would resolve to False here. Forcing True via the
+        # setting must still fold "Foo" and "foo" together, proving the
+        # override actually reaches deduplicate_slugs for Category too.
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        Category = old_apps.get_model("kioblog", "Category")
+        case_first = Category.objects.create(title="Case A", slug="Foo")
+        case_second = Category.objects.create(title="Case B", slug="foo")
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate([self.migrate_to])
+
+        new_apps = executor.loader.project_state([self.migrate_to]).apps
+        Category = new_apps.get_model("kioblog", "Category")
+        self.assertEqual(Category.objects.get(pk=case_first.pk).slug, "Foo")
+        self.assertEqual(Category.objects.get(pk=case_second.pk).slug, "foo-2")
+
+
 class DeduplicateSlugsUsingParameterTests(SimpleTestCase):
     def test_using_is_threaded_to_the_manager_and_save(self) -> None:
         # A true cross-database check needs a second configured alias with
