@@ -12,7 +12,7 @@ narrower unit-style check in test_slugs.py.
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, override_settings
 
 
 class DeduplicatePostSlugsMigrationTests(TransactionTestCase):
@@ -84,3 +84,52 @@ class DeduplicatePostSlugsMigrationTests(TransactionTestCase):
         Post = self.new_apps.get_model("kioblog", "Post")
         self.assertEqual(Post.objects.get(pk=self.case_first.pk).slug, "Foo")
         self.assertEqual(Post.objects.get(pk=self.case_second.pk).slug, "foo")
+
+
+class PostSlugFoldSettingOverrideMigrationTests(TransactionTestCase):
+    # Copilot finding: the migration's own docstring used to tell an
+    # installation on a non-default MySQL collation to "pass fold=False" -
+    # advice that was never actually actionable, since the migration's own
+    # RunPython callback is what supplies that argument, not the consumer.
+    # KIOBLOG_SLUG_FOLD is the real, working escape hatch; this proves it
+    # actually overrides the vendor guess rather than just being documented.
+    #
+    # Separate class, not a method added to DeduplicatePostSlugsMigrationTests
+    # above: KIOBLOG_SLUG_FOLD must be set before the migration itself runs,
+    # so this needs the migrate step inside the (overridden-settings) test
+    # method, not in a shared setUp that runs before any per-test override.
+    migrate_from = ("kioblog", "0006_post_content_markdownx")
+    migrate_to = ("kioblog", "0007_enforce_unique_post_slugs")
+
+    def tearDown(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    @override_settings(KIOBLOG_SLUG_FOLD=True)
+    def test_setting_true_forces_folding_even_on_a_case_sensitive_backend(self) -> None:
+        # This repo's real connection is SQLite - the migration's own vendor
+        # check alone would resolve to False here, same as every other test
+        # in this file. Forcing True via the setting must still fold "Foo"
+        # and "foo" together, proving the override actually reaches
+        # deduplicate_slugs and isn't shadowed by the vendor check.
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        User = old_apps.get_model("auth", "User")
+        Category = old_apps.get_model("kioblog", "Category")
+        Post = old_apps.get_model("kioblog", "Post")
+        user = User.objects.create(username="foldsettingtestuser")
+        category = Category.objects.create(title="cat", slug="fold-setting-cat")
+        case_first = Post.objects.create(title="E", content="x", user=user, category=category, slug="Foo")
+        case_second = Post.objects.create(title="F", content="x", user=user, category=category, slug="foo")
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate([self.migrate_to])
+
+        new_apps = executor.loader.project_state([self.migrate_to]).apps
+        Post = new_apps.get_model("kioblog", "Post")
+        self.assertEqual(Post.objects.get(pk=case_first.pk).slug, "Foo")
+        self.assertEqual(Post.objects.get(pk=case_second.pk).slug, "foo-2")

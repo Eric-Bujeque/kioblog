@@ -25,7 +25,11 @@ class DeduplicateSlugsTests(base.BaseTestCase):
         first = models.Category.objects.create(title="one", slug="Foo")
         second = models.Category.objects.create(title="two", slug="foo")
 
-        deduplicate_slugs(models.Category)
+        # fold=True explicitly: this test is specifically about proving
+        # folding works, so it shouldn't lean on whatever the function's own
+        # default happens to be (deliberately the safe, non-destructive
+        # fold=False, for any caller that forgets to choose).
+        deduplicate_slugs(models.Category, fold=True)
 
         first.refresh_from_db()
         second.refresh_from_db()
@@ -41,7 +45,7 @@ class DeduplicateSlugsTests(base.BaseTestCase):
         first = models.Category.objects.create(title="one", slug="café")
         second = models.Category.objects.create(title="two", slug="cafe")
 
-        deduplicate_slugs(models.Category)
+        deduplicate_slugs(models.Category, fold=True)
 
         first.refresh_from_db()
         second.refresh_from_db()
@@ -71,6 +75,25 @@ class DeduplicateSlugsTests(base.BaseTestCase):
         self.assertEqual(foo2.slug, "foo")
         self.assertEqual(cafe_accented.slug, "café")
         self.assertEqual(cafe_plain.slug, "cafe")
+
+    def test_default_is_fold_false_the_safe_non_destructive_choice(self) -> None:
+        # Copilot finding, real: fold defaulted to True, which is backwards -
+        # a default should be the safe choice, not the one that can rename a
+        # live, working URL for no reason on a backend that never needed it.
+        # Every actual call site in this codebase already passes fold=
+        # explicitly (the migrations, from the connection's vendor; the two
+        # tests above, deliberately, to prove folding itself works) - this
+        # proves the *default* itself, with no fold= argument at all, in
+        # case a future caller forgets to choose.
+        foo = models.Category.objects.create(title="one", slug="Foo")
+        foo2 = models.Category.objects.create(title="two", slug="foo")
+
+        deduplicate_slugs(models.Category)
+
+        foo.refresh_from_db()
+        foo2.refresh_from_db()
+        self.assertEqual(foo.slug, "Foo")
+        self.assertEqual(foo2.slug, "foo")
 
     def test_using_is_threaded_to_the_manager_and_save(self) -> None:
         # A true cross-database check needs a second configured alias with

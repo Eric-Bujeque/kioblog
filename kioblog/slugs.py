@@ -33,17 +33,24 @@ def _fold(slug):
     marks additionally models common accent-insensitive collations
     (MySQL's `*_ai_ci` family treats "café" and "cafe" as equal too) - this
     is a heuristic covering ordinary Latin-script accents, not a faithful
-    reimplementation of any specific collation's exact rules (Turkish
-    dotless i, German ß, Nordic å/ä/ö as distinct base letters, and similar
-    locale-specific cases aren't attempted). Deliberately still pessimistic
-    like the plain case-folding it extends: a pair only a real collision
-    under some backend's collation gets renamed everywhere, which is
-    harmless where it wasn't strictly required.
+    reimplementation of any specific collation's exact rules. Confirmed
+    directly (not just asserted) which locale-specific cases that leaves
+    out: å/ä/ö and ß are NOT among them - NFKD decomposes å/ä/ö into a plain
+    a/a/o plus a combining mark this function already drops, and casefold()
+    already maps ß to "ss", so all four fold like any other accented
+    character here. What's genuinely NOT attempted is Turkish dotless-i
+    casing (casefold() is locale-independent, so "I" always folds towards
+    ASCII "i", never Turkish's dotless "ı") and any other locale-specific
+    *casing* rule - as opposed to the accent-stripping above, which is
+    locale-independent by construction. Deliberately still pessimistic like
+    the plain case-folding it extends: a pair only a real collision under
+    some backend's collation gets renamed everywhere, which is harmless
+    where it wasn't strictly required.
     """
     return "".join(c for c in unicodedata.normalize("NFKD", slug.casefold()) if not unicodedata.combining(c))
 
 
-def deduplicate_slugs(model, slug_field="slug", order_by="pk", using=None, fold=True):
+def deduplicate_slugs(model, slug_field="slug", order_by="pk", using=None, fold=False):
     """Rename every slug collision on `model` to `<slug>-2`, `<slug>-3`, ...
 
     The first row (by `order_by`) to use a given slug keeps it; later rows
@@ -58,34 +65,39 @@ def deduplicate_slugs(model, slug_field="slug", order_by="pk", using=None, fold=
     this for RunPython. Pass `schema_editor.connection.alias`.
 
     `fold`: whether to compare slugs via `_fold()` (case/accent-insensitive)
-    instead of exact strings. Slugs are public, user-facing identifiers -
-    Post.slug is in every post URL - so this is NOT free to default to
-    pessimistically-on the way the case/accent-insensitivity logic itself
-    started out: on a case-sensitive backend (SQLite, PostgreSQL's defaults),
-    two rows like "Foo" and "foo" are genuinely distinct values a real unique
-    index would accept *both* of unchanged, and folding them anyway silently
-    renames a live, working, indexed URL for no reason - the very failure
-    this migration exists to avoid causing. Callers should pass
-    `fold=schema_editor.connection.vendor == "mysql"` (or true for whichever
-    vendors they know default to a permissive collation), not leave this at
-    its default outside of the direct/mocked calls that don't have a real
-    connection to check.
+    instead of exact strings. Defaults to False - the non-destructive
+    choice - not True: slugs are public, user-facing identifiers (Post.slug
+    is in every post URL), and on a case-sensitive backend (SQLite,
+    PostgreSQL's defaults), two rows like "Foo" and "foo" are genuinely
+    distinct values a real unique index would accept *both* of unchanged.
+    Folding by default would silently rename a live, working, indexed URL
+    on every backend that never needed it - the exact failure this
+    migration exists to avoid causing - just to save a caller one explicit
+    argument on the one backend family that does. A migration wrapper that
+    actually needs folding (MySQL's permissive defaults) opts in
+    explicitly, e.g. `fold=schema_editor.connection.vendor == "mysql"` (see
+    migrations 0007 and 0009); this default only matters to a future caller
+    who forgets to choose, and the safe choice for that caller is to do
+    nothing rather than possibly break a live URL.
 
-    That vendor check is itself only a heuristic for the collation MySQL
-    ships with out of the box (`utf8mb4_0900_ai_ci` as of MySQL 8, and its
-    `*_ai_ci`/`*_ci` predecessors) - it does not inspect the slug column's
-    *actual* collation. An installation that deliberately configured a
-    case/accent-sensitive one instead (`utf8mb4_bin`, `*_as_cs`) would still
-    get folded here even though its own unique index would have accepted
-    both variants unchanged, the same unnecessary-rename failure this `fold`
-    parameter exists to avoid on SQLite/PostgreSQL. Determining this from the
-    column's real collation (`information_schema.columns`, or equivalent)
-    instead of a vendor guess would close that gap, at the cost of
-    backend-specific introspection this migration doesn't otherwise need -
-    not done here as a deliberate scope call for what is a one-time,
-    best-effort retrofit onto existing data, not a runtime guarantee. An
-    installation on a deliberately case-sensitive MySQL collation should
-    pass `fold=False` explicitly rather than rely on this default.
+    A vendor check like that is itself only a heuristic for the collation
+    MySQL ships with out of the box (`utf8mb4_0900_ai_ci` as of MySQL 8,
+    and its `*_ai_ci`/`*_ci` predecessors) - it does not inspect the slug
+    column's *actual* collation. An installation that deliberately
+    configured a case/accent-sensitive one instead (`utf8mb4_bin`,
+    `*_as_cs`) would still get folded by such a wrapper, even though its
+    own unique index would have accepted both variants unchanged - the same
+    unnecessary-rename failure this default exists to avoid on
+    SQLite/PostgreSQL. Determining this from the column's real collation
+    (`information_schema.columns`, or equivalent) instead of a vendor guess
+    would close that gap, at the cost of backend-specific introspection
+    this migration doesn't otherwise need - not done here as a deliberate
+    scope call for what is a one-time, best-effort retrofit onto existing
+    data, not a runtime guarantee. Migrations 0007 and 0009 both expose a
+    settings override (`KIOBLOG_SLUG_FOLD`) for exactly this case, since
+    "pass fold=False yourself" was never actually something an installation
+    could do - the migration's own RunPython callback is what supplies this
+    argument, not the consumer.
     """
     manager = model.objects.using(using) if using else model.objects
     max_length = model._meta.get_field(slug_field).max_length

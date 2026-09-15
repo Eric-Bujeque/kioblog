@@ -13,6 +13,7 @@ collisions (kioblog.slugs.deduplicate_slugs) rather than letting `migrate`
 fail on someone else's data.
 """
 
+from django.conf import settings
 from django.db import migrations, models
 
 from kioblog.slugs import deduplicate_slugs
@@ -25,16 +26,26 @@ def deduplicate_post_slugs(apps, schema_editor):
     # connection `migrate` is actually targeting - Django's own migration
     # docs call this out explicitly for RunPython operations.
     #
-    # fold=True only on MySQL: Post.slug is public (every post URL is
-    # /<slug>/), so case/accent-folding on a case-sensitive backend (SQLite,
-    # PostgreSQL's defaults) would silently rename a live, distinct, already-
-    # working slug like "Foo" for no reason - the real unique index on those
-    # backends would have accepted it unchanged. Folding is only actually
-    # needed on a backend whose default collation is itself permissive - a
-    # vendor-level guess, not the column's actual collation; see
-    # deduplicate_slugs's own `fold` docstring for what that does and
-    # doesn't cover (a deliberately case-sensitive MySQL collation, e.g.).
-    deduplicate_slugs(Post, using=schema_editor.connection.alias, fold=schema_editor.connection.vendor == 'mysql')
+    # fold=True only on MySQL by default: Post.slug is public (every post
+    # URL is /<slug>/), so case/accent-folding on a case-sensitive backend
+    # (SQLite, PostgreSQL's defaults) would silently rename a live, distinct,
+    # already-working slug like "Foo" for no reason - the real unique index
+    # on those backends would have accepted it unchanged. Folding is only
+    # actually needed on a backend whose default collation is itself
+    # permissive - a vendor-level guess, not the column's actual collation;
+    # see deduplicate_slugs's own `fold` docstring for what that does and
+    # doesn't cover.
+    #
+    # KIOBLOG_SLUG_FOLD lets an installation override that guess: unset
+    # (None, the default), this falls back to the vendor heuristic above.
+    # Set it to True or False in settings.py before running this migration
+    # to force folding either way - the escape hatch for anyone on a MySQL
+    # collation that isn't the permissive default (utf8mb4_bin, e.g.), where
+    # the vendor-only guess would fold unnecessarily.
+    fold = getattr(settings, 'KIOBLOG_SLUG_FOLD', None)
+    if fold is None:
+        fold = schema_editor.connection.vendor == 'mysql'
+    deduplicate_slugs(Post, using=schema_editor.connection.alias, fold=fold)
 
 
 class Migration(migrations.Migration):
