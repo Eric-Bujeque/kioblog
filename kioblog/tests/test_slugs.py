@@ -48,6 +48,30 @@ class DeduplicateSlugsTests(base.BaseTestCase):
         self.assertEqual(first.slug, "café")
         self.assertEqual(second.slug, "cafe-2")
 
+    def test_fold_false_leaves_case_and_accent_variants_untouched(self) -> None:
+        # Post.slug is public - every post URL is /<slug>/ - so folding is
+        # NOT free to apply unconditionally. On a case-sensitive backend
+        # (SQLite, PostgreSQL's defaults), "Foo" and "foo" are genuinely
+        # distinct values the real unique index would accept both of
+        # unchanged; renaming one anyway would silently turn a live, working
+        # URL into a 404 for no reason. Callers pass fold=False for those
+        # backends (see migration 0007's own fold=... call).
+        foo = models.Category.objects.create(title="one", slug="Foo")
+        foo2 = models.Category.objects.create(title="two", slug="foo")
+        cafe_accented = models.Category.objects.create(title="three", slug="café")
+        cafe_plain = models.Category.objects.create(title="four", slug="cafe")
+
+        deduplicate_slugs(models.Category, fold=False)
+
+        foo.refresh_from_db()
+        foo2.refresh_from_db()
+        cafe_accented.refresh_from_db()
+        cafe_plain.refresh_from_db()
+        self.assertEqual(foo.slug, "Foo")
+        self.assertEqual(foo2.slug, "foo")
+        self.assertEqual(cafe_accented.slug, "café")
+        self.assertEqual(cafe_plain.slug, "cafe")
+
     def test_using_is_threaded_to_the_manager_and_save(self) -> None:
         # A true cross-database check needs a second configured alias with
         # its own test database, which this repo's dev settings don't set up

@@ -24,7 +24,14 @@ def deduplicate_post_slugs(apps, schema_editor):
     # and writes the "default" database alias, regardless of which
     # connection `migrate` is actually targeting - Django's own migration
     # docs call this out explicitly for RunPython operations.
-    deduplicate_slugs(Post, using=schema_editor.connection.alias)
+    #
+    # fold=True only on MySQL: Post.slug is public (every post URL is
+    # /<slug>/), so case/accent-folding on a case-sensitive backend (SQLite,
+    # PostgreSQL's defaults) would silently rename a live, distinct, already-
+    # working slug like "Foo" for no reason - the real unique index on those
+    # backends would have accepted it unchanged. Folding is only actually
+    # needed on a backend whose default collation is itself permissive.
+    deduplicate_slugs(Post, using=schema_editor.connection.alias, fold=schema_editor.connection.vendor == 'mysql')
 
 
 class Migration(migrations.Migration):

@@ -43,7 +43,7 @@ def _fold(slug):
     return "".join(c for c in unicodedata.normalize("NFKD", slug.casefold()) if not unicodedata.combining(c))
 
 
-def deduplicate_slugs(model, slug_field="slug", order_by="pk", using=None):
+def deduplicate_slugs(model, slug_field="slug", order_by="pk", using=None, fold=True):
     """Rename every slug collision on `model` to `<slug>-2`, `<slug>-3`, ...
 
     The first row (by `order_by`) to use a given slug keeps it; later rows
@@ -56,6 +56,20 @@ def deduplicate_slugs(model, slug_field="slug", order_by="pk", using=None):
     manager otherwise always hits the "default" alias regardless of which
     connection is actually being migrated - Django's own docs warn about
     this for RunPython. Pass `schema_editor.connection.alias`.
+
+    `fold`: whether to compare slugs via `_fold()` (case/accent-insensitive)
+    instead of exact strings. Slugs are public, user-facing identifiers -
+    Post.slug is in every post URL - so this is NOT free to default to
+    pessimistically-on the way the case/accent-insensitivity logic itself
+    started out: on a case-sensitive backend (SQLite, PostgreSQL's defaults),
+    two rows like "Foo" and "foo" are genuinely distinct values a real unique
+    index would accept *both* of unchanged, and folding them anyway silently
+    renames a live, working, indexed URL for no reason - the very failure
+    this migration exists to avoid causing. Callers should pass
+    `fold=schema_editor.connection.vendor == "mysql"` (or true for whichever
+    vendors they know default to a permissive collation), not leave this at
+    its default outside of the direct/mocked calls that don't have a real
+    connection to check.
     """
     manager = model.objects.using(using) if using else model.objects
     max_length = model._meta.get_field(slug_field).max_length
@@ -68,15 +82,11 @@ def deduplicate_slugs(model, slug_field="slug", order_by="pk", using=None):
     # to be named here even when order_by is the default "pk"; stripped of
     # a leading "-" in case a caller ever orders by something else descending.
     rows = list(manager.only(slug_field, order_by.lstrip("-")).order_by(order_by))
+    key_fn = _fold if fold else (lambda s: s)
     # Snapshot every slug that already exists, so a rename never lands on one
     # that belongs to a row this loop hasn't reached yet - that row keeps its
     # original slug (it isn't itself a duplicate), so the value stays taken.
-    #
-    # Compared via _fold(), not the exact string: a unique index under a
-    # permissive collation - MySQL's defaults, for instance - can treat two
-    # different Python strings as the same value (case, and common accents -
-    # see _fold's own docstring for exactly what it does and doesn't cover).
-    existing_keys = {_fold(getattr(obj, slug_field)) for obj in rows}
+    existing_keys = {key_fn(getattr(obj, slug_field)) for obj in rows}
     seen = set()
     # Remembers where the search left off for each base slug, so the next
     # duplicate of the *same* one doesn't re-scan candidates already claimed
@@ -91,18 +101,18 @@ def deduplicate_slugs(model, slug_field="slug", order_by="pk", using=None):
 
     for obj in rows:
         slug = getattr(obj, slug_field)
-        key = _fold(slug)
+        key = key_fn(slug)
         if key not in seen:
             seen.add(key)
             continue
 
         suffix = next_suffix.get(key, 2)
         candidate = f"{slug[: max_length - len(f'-{suffix}')]}-{suffix}"
-        while _fold(candidate) in seen or _fold(candidate) in existing_keys:
+        while key_fn(candidate) in seen or key_fn(candidate) in existing_keys:
             suffix += 1
             candidate = f"{slug[: max_length - len(f'-{suffix}')]}-{suffix}"
         next_suffix[key] = suffix + 1
 
-        seen.add(_fold(candidate))
+        seen.add(key_fn(candidate))
         setattr(obj, slug_field, candidate)
         obj.save(using=using, update_fields=[slug_field])
