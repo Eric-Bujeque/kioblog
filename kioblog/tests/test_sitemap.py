@@ -1,6 +1,7 @@
 from xml.etree import ElementTree
 
 from django.urls import reverse
+from django.utils import timezone
 
 from kioblog import models
 from kioblog.tests import base
@@ -71,3 +72,71 @@ class SitemapTests(base.BaseTestCase):
                 any(loc.endswith(path) for loc in locations),
                 f"{path} is missing from sitemap.xml",
             )
+
+    def _lastmod_for(self, path: str):
+        response = self.client.get(reverse("django.contrib.sitemaps.views.sitemap"))
+        self.assertEqual(response.status_code, 200)
+        root = ElementTree.fromstring(response.content)
+        for url_node in root.findall("sm:url", SITEMAP_NS):
+            loc = url_node.find("sm:loc", SITEMAP_NS).text
+            if loc.endswith(path):
+                node = url_node.find("sm:lastmod", SITEMAP_NS)
+                return node.text if node is not None else None
+        self.fail(f"{path} is missing from sitemap.xml")
+
+    def test_post_lastmod_reflects_the_last_edit_not_the_publish_date(self) -> None:
+        # Django's sitemap.xml template truncates lastmod to a bare date
+        # (Y-m-d, see the template - no time component), so the backdated and
+        # current dates must land on different *days* for this test to
+        # actually distinguish them; same-day, both would render identically
+        # either way.
+        #
+        # Backdates BOTH published and updated first (bypassing save()/
+        # auto_now via .update(), the way earlier tests in this session
+        # backdate `updated`), then edits *content only* and saves -
+        # published is never touched again. A test that just backdates
+        # published, saves once, and checks lastmod moved would still pass
+        # if auto_now fired on every save regardless of what changed; this
+        # one isolates that the edit itself is what's doing it.
+        backdated = timezone.now() - timezone.timedelta(days=10)
+        self.post.published = backdated
+        self.post.save()
+        models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
+        self.post.refresh_from_db()
+
+        self.post.content = "# Edited after backdating"
+        self.post.save()
+        self.post.refresh_from_db()
+
+        path = reverse("kioblog-post", kwargs={"slug": self.post.slug})
+        lastmod = self._lastmod_for(path)
+
+        self.assertEqual(self.post.published, backdated, "the edit above must not have moved published")
+        self.assertEqual(lastmod, self.post.updated.strftime("%Y-%m-%d"))
+        self.assertNotEqual(
+            lastmod,
+            self.post.published.strftime("%Y-%m-%d"),
+            "lastmod matches the (backdated) publish date - it's still tracking `published`, not `updated`",
+        )
+
+    def test_post_lastmod_moves_on_a_partial_save_too(self) -> None:
+        # save(update_fields=[...]) that omits "updated" would otherwise skip
+        # auto_now entirely - Django's _save_table only calls pre_save() (what
+        # auto_now relies on) for fields actually listed in update_fields,
+        # confirmed against Django's own source. Left unhandled, an edit made
+        # through any partial save - not unusual: forms, admin actions, and
+        # signal handlers often save() only the fields they touched - would
+        # silently stop moving lastmod.
+        backdated = timezone.now() - timezone.timedelta(days=10)
+        models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
+        self.post.refresh_from_db()
+
+        self.post.content = "# Partial save heading"
+        self.post.save(update_fields=["content"])
+        self.post.refresh_from_db()
+
+        path = reverse("kioblog-post", kwargs={"slug": self.post.slug})
+        lastmod = self._lastmod_for(path)
+
+        self.assertGreater(self.post.updated, backdated)
+        self.assertEqual(lastmod, self.post.updated.strftime("%Y-%m-%d"))
