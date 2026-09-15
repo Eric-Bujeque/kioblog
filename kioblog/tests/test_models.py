@@ -324,6 +324,21 @@ class KioblogModels(base.BaseTestCase):
         self.post.refresh_from_db()
         self.assertGreater(self.post.updated, backdated)
 
+    def test_editing_a_categorys_featured_flag_does_not_bump_updated(self) -> None:
+        # Copilot finding, real: post.html only renders post.category.title
+        # - `featured` isn't shown there at all, so a partial save that only
+        # touches it doesn't change the post's public page. Bumping
+        # unconditionally on any Category save (as this used to) would
+        # signal a page change, and a possible sitemap recrawl, for a field
+        # nobody's page actually shows.
+        backdated = self._backdate_post()
+
+        self.category.featured = not self.category.featured
+        self.category.save(update_fields=["featured"])
+
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.updated, backdated)
+
     def test_creating_a_category_does_not_touch_any_post(self) -> None:
         # A brand-new category can't be attached to any post yet at the
         # moment its own post_save fires, so creating one must not bump

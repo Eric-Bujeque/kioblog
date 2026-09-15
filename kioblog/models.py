@@ -313,18 +313,27 @@ def _bump_updated_on_tag_change(sender, instance, action, reverse, using, pk_set
             Post.objects.using(using).filter(pk__in=pk_set).update(updated=timezone.now())
 
 
-def _bump_updated_on_tag_edit(sender, instance, created, using, **kwargs):
+def _bump_updated_on_tag_edit(sender, instance, created, using, update_fields, **kwargs):
     # A Tag's title/slug is rendered on every post that has it (the tag
-    # links in post.html) - editing either changes those posts' public
-    # pages without ever touching Post itself, the same kind of gap
-    # m2m_changed exists to close for adding/removing a tag from a post.
-    # Copilot finding, real.
+    # links in post.html: `<a href="{% url 'kioblog-tag' tag.slug %}">#{{
+    # tag.title }}</a>`) - editing either changes those posts' public pages
+    # without ever touching Post itself, the same kind of gap m2m_changed
+    # exists to close for adding/removing a tag from a post. Copilot
+    # finding, real.
     #
     # `not created`: a brand-new tag can't be attached to any post yet at
     # the moment this fires - nothing could reference it before it existed
     # - so there's nothing to bump; skip the query entirely rather than
     # running a no-op UPDATE on every tag creation.
-    if not created:
+    #
+    # Also guarded on which fields actually changed, not just "was this a
+    # real edit": Tag has no fields today besides title/slug, but
+    # post_save's own update_fields (None for a full save, the field names
+    # for a partial one) is checked anyway, on the same reasoning as the
+    # Category receiver below - Copilot finding there, applying the same
+    # fix here for consistency and against a future field this wouldn't
+    # otherwise guard.
+    if not created and (update_fields is None or update_fields & {"title", "slug"}):
         Post.objects.using(using).filter(tags=instance).update(updated=timezone.now())
 
 
@@ -343,18 +352,27 @@ def _bump_updated_on_tag_delete(sender, instance, using, **kwargs):
     Post.objects.using(using).filter(tags=instance).update(updated=timezone.now())
 
 
-def _bump_updated_on_category_edit(sender, instance, created, using, **kwargs):
+def _bump_updated_on_category_edit(sender, instance, created, using, update_fields, **kwargs):
     # Copilot finding, real: post.html renders post.category.title directly
-    # - editing a Category's title/slug changes every one of its posts'
-    # public pages without ever touching Post itself, the same gap the Tag
-    # receivers above close for tags. No matching delete receiver needed:
-    # Post.category is on_delete=CASCADE, so deleting a Category deletes
-    # its posts along with it - there's no post left with a stale lastmod
-    # to bump.
+    # - editing it changes every one of that category's posts' public pages
+    # without ever touching Post itself, the same gap the Tag receivers
+    # above close for tags. No matching delete receiver needed: Post.category
+    # is on_delete=CASCADE, so deleting a Category deletes its posts along
+    # with it - there's no post left with a stale lastmod to bump.
     #
     # `not created`: a brand-new category can't be attached to any post yet
     # at the moment this fires, so there's nothing to bump.
-    if not created:
+    #
+    # Guarded on update_fields too, not just "was this a save at all":
+    # Category also has `featured` and `slug`, neither of which post.html
+    # renders (only category.title is) - category.save(update_fields=
+    # ["featured"]) used to bump every one of that category's posts'
+    # lastmod anyway, wrongly signalling a page change (and a possible
+    # recrawl) for a field the public post page doesn't show. update_fields
+    # is None for a bare save() (bump - can't tell what changed, so assume
+    # everything did, the same conservative default every other receiver
+    # here uses) or the actual field names for a partial one.
+    if not created and (update_fields is None or "title" in update_fields):
         Post.objects.using(using).filter(category=instance).update(updated=timezone.now())
 
 
