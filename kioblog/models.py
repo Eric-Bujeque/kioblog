@@ -290,8 +290,27 @@ def _bump_updated_on_tag_change(sender, instance, action, reverse, using, pk_set
         # "only bump on the post_* signals" reasoning above achieves by
         # ordering instead.
         Post.objects.using(using).filter(tags=instance).update(updated=timezone.now())
-    elif action in ("post_add", "post_remove") and pk_set:
-        Post.objects.using(using).filter(pk__in=pk_set).update(updated=timezone.now())
+    elif action == "post_add":
+        # Guarded on pk_set, same reasoning and same Django source as the
+        # forward direction's post_add above (this is the same
+        # ManyRelatedManager._add_items() either way, just with `reverse`
+        # toggling what `instance` means) - pk_set is empty for a genuine
+        # no-op re-add.
+        if pk_set:
+            Post.objects.using(using).filter(pk__in=pk_set).update(updated=timezone.now())
+    elif action == "post_remove":
+        # NOT guarded on pk_set, same reasoning as the forward direction's
+        # post_remove above: pk_set here is the *requested* ids (old_ids in
+        # Django's _remove_items), not the ones actually found and deleted,
+        # so it's always truthy whenever this signal fires at all - a
+        # no-op guard here wouldn't catch some_tag.posts.remove(post) for a
+        # post that was never attached. Same accepted, documented
+        # imprecision as the forward direction, not fixed here for the
+        # same reason: a real fix needs the same pre_remove-capture-and-
+        # diff complexity as pre_clear above, for a rare, low-consequence
+        # edge case.
+        if pk_set:
+            Post.objects.using(using).filter(pk__in=pk_set).update(updated=timezone.now())
 
 
 def _bump_updated_on_tag_edit(sender, instance, created, using, **kwargs):
