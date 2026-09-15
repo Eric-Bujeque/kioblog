@@ -44,12 +44,23 @@ class RenderCacheTests(base.BaseTestCase):
         # this is what would have caught RenderedContent not being picklable
         # as-is (its __new__ requires `toc`; pickle's default reconstruction
         # for a str subclass doesn't know to supply it).
-        first = models.Post.objects.get(pk=self.post.pk)
-        expected_html, expected_toc = first.content_html, first.toc
+        #
+        # Also asserts render_markdown runs only once, not just that the two
+        # reads' outputs match: since render_markdown is a pure function, a
+        # cache that silently wasn't used at all (cache.get() failing, or
+        # this instance falling back to a fresh render for any other reason)
+        # would still produce an identical second result - matching outputs
+        # alone doesn't prove the cache was actually read from. Copilot
+        # finding, real.
+        with patch("kioblog.models.render_markdown", MagicMock(side_effect=render_markdown)) as mocked:
+            first = models.Post.objects.get(pk=self.post.pk)
+            expected_html, expected_toc = first.content_html, first.toc
 
-        second = models.Post.objects.get(pk=self.post.pk)
-        self.assertEqual(second.content_html, expected_html)
-        self.assertEqual(second.toc, expected_toc)
+            second = models.Post.objects.get(pk=self.post.pk)
+            self.assertEqual(second.content_html, expected_html)
+            self.assertEqual(second.toc, expected_toc)
+
+        self.assertEqual(mocked.call_count, 1)
 
     def test_editing_the_post_invalidates_the_cached_render(self) -> None:
         _ = models.Post.objects.get(pk=self.post.pk).content_html  # populate the cache
