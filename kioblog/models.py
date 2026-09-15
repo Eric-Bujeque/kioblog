@@ -3,6 +3,7 @@ from html import unescape
 
 from django.conf import settings
 from django.db import models
+from django.db.models.signals import m2m_changed
 from django.utils import timezone
 from markdownx.models import MarkdownxField
 
@@ -62,7 +63,7 @@ class Post(models.Model):
     class Meta:
         ordering = ["-published", "-id"]
 
-    def save(self, *args, **kwargs):
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         # save(update_fields=[...]) that omits "updated" would otherwise skip
         # auto_now entirely - Django's _save_table only calls pre_save() (what
         # auto_now relies on) for fields actually listed in update_fields.
@@ -70,6 +71,15 @@ class Post(models.Model):
         # post.save(update_fields=["content"]) left `updated` untouched, which
         # would make the sitemap's lastmod (see sitemap.py) silently stop
         # reflecting edits made through any partial save.
+        #
+        # An explicit Django-matching signature, not (self, *args, **kwargs):
+        # Model.save()'s real signature takes update_fields positionally too
+        # (save(force_insert, force_update, using, update_fields)) - reading
+        # it only from kwargs let a positional call
+        # (post.save(False, False, None, ["content"])) skip this override,
+        # and the partial save it requested, entirely. Copilot finding, real
+        # - naming every parameter the same way Django does makes Python's
+        # own argument binding handle both call styles identically.
         #
         # Checked on a *truthy* update_fields, not just "is not None": Django
         # treats an explicitly empty update_fields ([] or set()) as "skip the
@@ -81,30 +91,24 @@ class Post(models.Model):
         # Materialized into a set before that truthiness check, not checked
         # on the raw argument: update_fields is documented as any iterable,
         # and a generator is a truthy *object* even when it would yield
-        # nothing once consumed - `if update_fields:` on the raw generator
-        # can't tell "empty" from "has items" without consuming it first, so
-        # an explicitly empty generator would still reach the branch below
-        # and turn Django's own empty-iterable no-op into a real write of
-        # just {"updated"}, exactly the bug the truthy check above exists to
-        # avoid for a plain empty list.
-        #
-        # kwargs["update_fields"] is reassigned to the materialized set
-        # unconditionally, not just inside the truthy branch: leaving the
-        # original (now-exhausted, for a generator) value in kwargs when the
-        # materialized set turns out empty would hand Django's own save() a
-        # still-truthy exhausted generator - its `if not update_fields:
-        # return` no-op wouldn't catch it either, and it would go on to
-        # re-consume the same exhausted generator itself, this time actually
-        # getting nothing and hitting its own internal assertion instead of
-        # cleanly no-op'ing (confirmed: this exact ordering raised
-        # `AssertionError` in Model.save_base() before being fixed).
-        update_fields = kwargs.get("update_fields")
+        # nothing once consumed - `if update_fields:` on the raw value can't
+        # tell "empty" from "has items" without consuming it first, so an
+        # explicitly empty generator would still reach the branch below and
+        # turn Django's own empty-iterable no-op into a real write of just
+        # {"updated"}, exactly the bug the truthy check above exists to
+        # avoid for a plain empty list. Reassigned unconditionally, not just
+        # inside the truthy branch: passing the exhausted-if-empty generator
+        # through unchanged would hand Django's own save() a still-truthy
+        # object whose own `if not update_fields: return` no-op wouldn't
+        # catch it either, and it would go on to re-consume the same
+        # exhausted generator itself, hitting its own internal assertion
+        # instead of cleanly no-op'ing (confirmed this exact ordering raised
+        # AssertionError in Model.save_base() before fixing it this way).
         if update_fields is not None:
             update_fields = set(update_fields)
-            kwargs["update_fields"] = update_fields
             if update_fields:
-                kwargs["update_fields"] = {*update_fields, "updated"}
-        super().save(*args, **kwargs)
+                update_fields.add("updated")
+        super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
 
     def _render(self):
         if not hasattr(self, "_rendered"):
@@ -164,6 +168,39 @@ class Post(models.Model):
         if current_slug is not None:
             recent_posts = recent_posts.exclude(slug=current_slug)
         return recent_posts[:5]
+
+
+def _bump_updated_on_tag_change(sender, instance, action, reverse, **kwargs):
+    # Copilot finding, real: auto_now only runs when Post.save() actually
+    # executes, but ManyToManyField.add()/remove()/clear() write straight to
+    # the through table and never call save() at all - a post's tags are
+    # part of what post.html renders, so changing only the tags (through the
+    # admin's own tags widget, e.g.) left `updated`, and so the sitemap's
+    # lastmod, standing still even though the page's content changed.
+    #
+    # `reverse` must be checked: this same signal also fires for the M2M's
+    # reverse direction (some_tag.posts.add(post), Tag.posts being this
+    # field's related_name) - there, `instance` is the Tag, not a Post, and
+    # Tag has no `updated` field at all. Only act on the forward direction,
+    # where `instance` is actually the Post whose tags changed.
+    #
+    # post_add/post_remove/post_clear, not the pre_* variants: those fire
+    # after the through-table write has actually happened, matching when
+    # save()'s own post_save would normally fire for a content edit -
+    # bumping updated on the pre_* signals would move it even if the
+    # underlying add()/remove()/clear() call went on to fail.
+    #
+    # save(update_fields=["updated"]) rather than a bare save(): a bare
+    # save() would re-run pre_save on every field via a full UPDATE for no
+    # reason - only `updated` itself actually needs touching here. Passing
+    # it through this override (not .update()) so auto_now still does the
+    # actual timestamping, the same single source of truth every other
+    # partial save in this file already goes through.
+    if not reverse and action in ("post_add", "post_remove", "post_clear"):
+        instance.save(update_fields=["updated"])
+
+
+m2m_changed.connect(_bump_updated_on_tag_change, sender=Post.tags.through)
 
 
 class Comment(models.Model):

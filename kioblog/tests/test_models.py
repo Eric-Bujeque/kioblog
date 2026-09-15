@@ -117,3 +117,73 @@ class KioblogModels(base.BaseTestCase):
         self.post.refresh_from_db()
         self.assertEqual(self.post.updated, before)
         self.assertNotEqual(self.post.title, "should not be saved")
+
+    def test_update_fields_passed_positionally_still_bumps_updated(self) -> None:
+        # Copilot finding, real: Model.save()'s actual signature is
+        # save(force_insert, force_update, using, update_fields) -
+        # update_fields can be passed positionally, not only as a keyword.
+        # Reading it exclusively from kwargs (the old *args, **kwargs
+        # signature) let a positional call like this one skip this override,
+        # and the partial save it requested, entirely - auto_now would then
+        # never run, leaving `updated` (and so the sitemap's lastmod) stale.
+        backdated = timezone.now() - timezone.timedelta(days=1)
+        models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
+
+        stale = models.Post.objects.get(pk=self.post.pk)
+        stale.content = "# Positional save"
+        stale.save(False, False, None, ["content"])
+
+        fresh = models.Post.objects.get(pk=self.post.pk)
+        self.assertGreater(fresh.updated, backdated)
+        self.assertEqual(fresh.content, "# Positional save")
+
+    def _backdate_post(self):
+        backdated = timezone.now() - timezone.timedelta(days=1)
+        models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
+        return backdated
+
+    def test_adding_a_tag_bumps_updated(self) -> None:
+        # Copilot finding, real: ManyToManyField.add()/remove()/clear() write
+        # straight to the through table and never call Post.save() at all,
+        # so auto_now never ran for a tags-only change - even though a
+        # post's tags are part of what post.html renders, leaving the
+        # sitemap's lastmod standing still for an edit that changed the
+        # public page.
+        backdated = self._backdate_post()
+        tag = models.Tag.objects.create(title="new tag", slug="new-tag")
+
+        self.post.tags.add(tag)
+
+        self.post.refresh_from_db()
+        self.assertGreater(self.post.updated, backdated)
+
+    def test_removing_a_tag_bumps_updated(self) -> None:
+        tag = models.Tag.objects.create(title="removable", slug="removable")
+        self.post.tags.add(tag)
+        backdated = self._backdate_post()
+
+        self.post.tags.remove(tag)
+
+        self.post.refresh_from_db()
+        self.assertGreater(self.post.updated, backdated)
+
+    def test_clearing_tags_bumps_updated(self) -> None:
+        tag = models.Tag.objects.create(title="clearable", slug="clearable")
+        self.post.tags.add(tag)
+        backdated = self._backdate_post()
+
+        self.post.tags.clear()
+
+        self.post.refresh_from_db()
+        self.assertGreater(self.post.updated, backdated)
+
+    def test_reverse_tag_change_does_not_crash(self) -> None:
+        # The same m2m_changed signal also fires for the reverse direction
+        # (some_tag.posts.add(post), via the M2M's related_name="posts") -
+        # there, `instance` is the Tag, not a Post, and Tag has no `updated`
+        # field at all. Must be a no-op rather than raising FieldError.
+        tag = models.Tag.objects.create(title="reverse", slug="reverse")
+
+        tag.posts.add(self.post)
+
+        self.assertIn(self.post, tag.posts.all())
