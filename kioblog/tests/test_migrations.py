@@ -446,3 +446,49 @@ class DeduplicateSlugsUsingParameterTests(SimpleTestCase):
         foo2.save.assert_not_called()
         cafe_accented.save.assert_not_called()
         cafe_plain.save.assert_not_called()
+
+
+class CategoryTagDefaultOrderingMigrationTests(TransactionTestCase):
+    # Unlike 0007/0009/0011, this migration's own operation (AlterModelOptions)
+    # never touches the database schema - ordering is Meta-only. Still
+    # TransactionTestCase, matching every other class in this file, so
+    # reversing it in tearDown behaves the same way as the rest of the suite.
+    #
+    # Copilot flagged that test_models.py's ordering tests
+    # (test_category_default_ordering_is_by_title and friends) only check
+    # the live, already-migrated models.Category/models.Tag - they'd still
+    # pass even if 0010 omitted or misstated an AlterModelOptions operation,
+    # since nothing exercises the migration transition itself. These do.
+    migrate_from = ("kioblog", "0009_enforce_unique_category_slugs")
+    migrate_to = ("kioblog", "0010_category_tag_default_ordering")
+
+    def setUp(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        self.old_apps = executor.loader.project_state([self.migrate_from]).apps
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate([self.migrate_to])
+        self.new_apps = executor.loader.project_state([self.migrate_to]).apps
+
+    def tearDown(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_category_has_no_ordering_before_the_migration(self) -> None:
+        Category = self.old_apps.get_model("kioblog", "Category")
+        self.assertEqual(Category._meta.ordering, [])
+
+    def test_category_ordering_is_title_then_id_after_the_migration(self) -> None:
+        Category = self.new_apps.get_model("kioblog", "Category")
+        self.assertEqual(Category._meta.ordering, ["title", "id"])
+
+    def test_tag_has_no_ordering_before_the_migration(self) -> None:
+        Tag = self.old_apps.get_model("kioblog", "Tag")
+        self.assertEqual(Tag._meta.ordering, [])
+
+    def test_tag_ordering_is_title_then_id_after_the_migration(self) -> None:
+        Tag = self.new_apps.get_model("kioblog", "Tag")
+        self.assertEqual(Tag._meta.ordering, ["title", "id"])
