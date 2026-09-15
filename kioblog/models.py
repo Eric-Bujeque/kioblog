@@ -522,19 +522,6 @@ pre_delete.connect(_bump_updated_on_tag_delete, sender=Tag)
 post_save.connect(_bump_updated_on_category_edit, sender=Category)
 
 
-class Comment(models.Model):
-    username = models.CharField(max_length=100)
-    content = models.TextField()
-    parent = models.ForeignKey("self", on_delete=models.CASCADE, null=True, blank=True)
-    post = models.ForeignKey(Post, related_name="comments", on_delete=models.CASCADE)
-    created = models.DateField(auto_now_add=True)
-    email = models.EmailField()
-    api = models.CharField(null=True, blank=True, max_length=50)
-
-    def __str__(self):
-        return f"{self.username} - {self.post}"
-
-
 class Meta(models.Model):
     key = models.CharField(max_length=100)
     value = models.CharField(max_length=250, null=True)

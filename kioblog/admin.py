@@ -19,10 +19,6 @@ class TagAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("title",)}
 
 
-class CommentAdmin(admin.ModelAdmin):
-    list_display = ("username", "post", "parent", "created")
-
-
 class MetaAdmin(admin.ModelAdmin):
     list_display = ("key", "value")
 
@@ -30,5 +26,4 @@ class MetaAdmin(admin.ModelAdmin):
 admin.site.register(models.Post, PostAdmin)
 admin.site.register(models.Category, CategoryAdmin)
 admin.site.register(models.Tag, TagAdmin)
-admin.site.register(models.Comment, CommentAdmin)
 admin.site.register(models.Meta, MetaAdmin)
