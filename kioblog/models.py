@@ -1,13 +1,33 @@
+import hashlib
+import logging
 import re
 from html import unescape
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import models, router
 from django.db.models.signals import m2m_changed, post_save, pre_delete
 from django.utils import timezone
 from markdownx.models import MarkdownxField
 
-from kioblog.markdown.render import render_markdown
+from kioblog.markdown.render import RenderedContent, render_markdown
+
+logger = logging.getLogger(__name__)
+
+# Bump when render_markdown's output changes shape (code_chrome.py markup,
+# pygments_onedark.py styling, the toc extension's settings, ...) - the cache
+# key below has no way to know a new kioblog release changed what the same
+# `content` renders to, so without this a post nobody has edited keeps
+# serving the previous version's HTML/toc until its entry happens to expire.
+_RENDER_CACHE_VERSION = 1
+
+# Deliberately bounded, not None: the key changes on every edit (see
+# Post._render_cache_key), so with no timeout every past revision of every
+# post leaves a permanent cache entry - fine for LocMemCache/Memcached, which
+# cap their own size, but Redis's default maxmemory-policy is `noeviction`,
+# so an unconfigured Redis-backed cache would grow forever. 30 days bounds
+# the worst case without meaningfully hurting the hit rate for unedited posts.
+_RENDER_CACHE_TIMEOUT = 60 * 60 * 24 * 30
 
 
 class Category(models.Model):
@@ -108,10 +128,23 @@ class Post(models.Model):
         # `using` resolved through the router exactly once, here, and reused
         # for both the deferred-field decision below and the super().save()
         # call at the end - not left as None for Django to resolve a second
-        # time on its own, which could hand back a different alias for a
-        # router whose answer isn't stable across calls.
+        # time on its own. Copilot finding, real: a router whose
+        # db_for_write() isn't deterministic across calls (round-robin
+        # across read replicas, for instance) could otherwise hand back a
+        # different alias the second time, so the deferred-field shortcut
+        # would be decided against one database while the actual write goes
+        # to another.
         using = using or router.db_for_write(self.__class__, instance=self)
         if update_fields is not None:
+            # Materialized before checking truthiness, not checked on the
+            # raw argument: an update_fields that's an iterable other than a
+            # list/set/tuple - a generator, for instance - is a truthy
+            # *object* even when it would yield nothing once consumed, so
+            # `if update_fields:` on the raw value would still add "updated"
+            # and turn Django's own empty-iterable no-op into a real write.
+            # Materializing once up front makes truthiness reflect whether
+            # it's *actually* empty, for any iterable type, the same way it
+            # already correctly does for a plain list or set.
             update_fields = set(update_fields)
             if update_fields:
                 update_fields.add("updated")
@@ -141,9 +174,96 @@ class Post(models.Model):
                     update_fields = {*loaded, "updated"}
         super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
 
+    def _render_cache_key(self):
+        # None skips the shared cache entirely, falling back to the
+        # per-instance-only caching below - correct for an unsaved instance,
+        # whether that's because pk is None or (see _state.adding below)
+        # because a pk was assigned by hand without ever actually saving.
+        # A *saved* instance with a dirty in-memory content edit does NOT
+        # take this path - Copilot finding, real, this comment used to claim
+        # otherwise. It still gets a real key below, from the content hash;
+        # that's what makes the edit visible without needing updated to move
+        # (see the next comment) rather than something this None-return
+        # needs to special-case.
+        #
+        # Deliberately keyed on a hash of content, not on `pk` + `updated`:
+        # render_markdown is a pure function of `content` alone, so hashing it
+        # directly means the key is correct by construction rather than by
+        # keeping a proxy (`updated`) in sync with it - which also sidesteps
+        # a manually-assigned pk on an unsaved instance (updated is still None
+        # there; content never is) and an in-memory content edit that was
+        # never saved (updated wouldn't move, but content already has).
+        #
+        # `self._state.adding`, not just `self.pk is None`: a Post
+        # constructed with an explicit pk (Post(pk=999999, ...)) is still
+        # unsaved - `_state.adding` stays True until a real save() completes
+        # - but `self.pk` is already set, so the `pk is None` check alone let
+        # this preview path reach the shared cache under a real-looking
+        # database key. Copilot finding, real: that both pollutes the shared
+        # cache with content that was never actually persisted under that
+        # pk, and violates the "unsaved previews never touch the shared
+        # cache" behavior the rest of this method and its tests assume.
+        if self.pk is None or self._state.adding:
+            return None
+        # (self.content or ""), not self.content directly: render_markdown()
+        # itself already treats None as "" (`md.convert(text or "")`), so a
+        # *saved* instance whose content was changed to None in memory
+        # (never re-saved) should hash to the same key as an empty string
+        # renders to, not raise AttributeError on .encode() before ever
+        # reaching render_markdown at all. A manually-assigned pk on an
+        # unsaved instance never reaches this line in the first place - the
+        # _state.adding guard above already returns None for it; Copilot
+        # finding, real, this comment used to list that as a case handled
+        # here too.
+        digest = hashlib.sha256((self.content or "").encode("utf-8")).hexdigest()[:16]
+        return f"kioblog:post:{self.pk}:render:v{_RENDER_CACHE_VERSION}:{digest}"
+
     def _render(self):
-        if not hasattr(self, "_rendered"):
-            self._rendered = render_markdown(self.content)
+        # Re-renders whenever self.content no longer matches what _rendered
+        # was last computed from, not just on the first call - hasattr alone
+        # would let a second read on the SAME instance (post.content_html;
+        # post.content = "..."; post.content_html again) keep returning the
+        # first render, since nothing before this ever rechecked the source
+        # once _rendered existed at all. That's true independently of the
+        # shared cache below - it's this instance's own memoisation.
+        if not hasattr(self, "_rendered") or self._rendered_from != self.content:
+            cache_key = self._render_cache_key()
+            # Best-effort, not a hard dependency: this cache only exists to
+            # skip re-rendering, so a backend outage (Redis/Memcached down,
+            # a transient network error, ...) must not turn "post pages
+            # unavailable" into a side effect of "cache unavailable" -
+            # confirmed as a real gap, not theoretical: nothing before this
+            # caught an exception from cache.get()/cache.set(), so either
+            # call raising would propagate straight out of content_html and
+            # 500 the page, after render_markdown() had already succeeded.
+            cached = None
+            if cache_key:
+                try:
+                    cached = cache.get(cache_key)
+                except Exception:
+                    logger.warning("kioblog: cache.get failed for %s, rendering fresh", cache_key, exc_info=True)
+            if cached is not None:
+                # RenderedContent (a str subclass carrying .html/.toc as
+                # extra attributes) isn't picklable as-is - its __new__
+                # requires `toc`, which pickle's default str-subclass
+                # reconstruction doesn't know to supply. Verified this
+                # empirically (pickle.loads raised TypeError) before caching
+                # the plain (html, toc) tuple instead of the object itself.
+                html, toc = cached
+                self._rendered = RenderedContent(html, toc)
+            else:
+                self._rendered = render_markdown(self.content)
+                if cache_key:
+                    # Bounded timeout, not None: the key changes on every
+                    # edit, so an unbounded one leaves every past revision of
+                    # every post permanently cached - see
+                    # _RENDER_CACHE_TIMEOUT for why that's a real risk on a
+                    # Redis-backed cache specifically.
+                    try:
+                        cache.set(cache_key, (self._rendered.html, self._rendered.toc), timeout=_RENDER_CACHE_TIMEOUT)
+                    except Exception:
+                        logger.warning("kioblog: cache.set failed for %s, serving uncached", cache_key, exc_info=True)
+            self._rendered_from = self.content
         return self._rendered
 
     @property
