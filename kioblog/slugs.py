@@ -70,6 +70,22 @@ def deduplicate_slugs(model, slug_field="slug", order_by="pk", using=None, fold=
     vendors they know default to a permissive collation), not leave this at
     its default outside of the direct/mocked calls that don't have a real
     connection to check.
+
+    That vendor check is itself only a heuristic for the collation MySQL
+    ships with out of the box (`utf8mb4_0900_ai_ci` as of MySQL 8, and its
+    `*_ai_ci`/`*_ci` predecessors) - it does not inspect the slug column's
+    *actual* collation. An installation that deliberately configured a
+    case/accent-sensitive one instead (`utf8mb4_bin`, `*_as_cs`) would still
+    get folded here even though its own unique index would have accepted
+    both variants unchanged, the same unnecessary-rename failure this `fold`
+    parameter exists to avoid on SQLite/PostgreSQL. Determining this from the
+    column's real collation (`information_schema.columns`, or equivalent)
+    instead of a vendor guess would close that gap, at the cost of
+    backend-specific introspection this migration doesn't otherwise need -
+    not done here as a deliberate scope call for what is a one-time,
+    best-effort retrofit onto existing data, not a runtime guarantee. An
+    installation on a deliberately case-sensitive MySQL collation should
+    pass `fold=False` explicitly rather than rely on this default.
     """
     manager = model.objects.using(using) if using else model.objects
     max_length = model._meta.get_field(slug_field).max_length

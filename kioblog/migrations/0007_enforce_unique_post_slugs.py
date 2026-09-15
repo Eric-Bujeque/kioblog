@@ -30,7 +30,10 @@ def deduplicate_post_slugs(apps, schema_editor):
     # PostgreSQL's defaults) would silently rename a live, distinct, already-
     # working slug like "Foo" for no reason - the real unique index on those
     # backends would have accepted it unchanged. Folding is only actually
-    # needed on a backend whose default collation is itself permissive.
+    # needed on a backend whose default collation is itself permissive - a
+    # vendor-level guess, not the column's actual collation; see
+    # deduplicate_slugs's own `fold` docstring for what that does and
+    # doesn't cover (a deliberately case-sensitive MySQL collation, e.g.).
     deduplicate_slugs(Post, using=schema_editor.connection.alias, fold=schema_editor.connection.vendor == 'mysql')
 
 
