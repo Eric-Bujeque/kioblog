@@ -99,3 +99,21 @@ class KioblogModels(base.BaseTestCase):
         )
         # self.post (non-draft) counts, the draft does not.
         self.assertEqual(self.category.post_count(), 1)
+
+    def test_an_empty_update_fields_generator_stays_a_no_op(self) -> None:
+        # Copilot finding, real: update_fields is documented as any iterable,
+        # and a generator is a truthy *object* even when it would yield
+        # nothing once consumed - `if update_fields:` on the raw generator
+        # can't tell "empty" from "has items" without consuming it first.
+        # Unlike an empty list/set (already handled), an unconsumed empty
+        # generator used to pass that truthy check, adding "updated" and
+        # turning Django's own empty-iterable no-op (`if not update_fields:
+        # return`, in Model.save() itself) into a real write of just
+        # {"updated"}.
+        before = self.post.updated
+        self.post.title = "should not be saved"
+        self.post.save(update_fields=(name for name in ()))
+
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.updated, before)
+        self.assertNotEqual(self.post.title, "should not be saved")

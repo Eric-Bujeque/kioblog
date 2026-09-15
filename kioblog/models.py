@@ -77,9 +77,33 @@ class Post(models.Model):
         # update_fields: return`, before touching the database at all. Firing
         # on `is not None` would have turned that intentional no-op into a
         # real write of just {"updated"}.
+        #
+        # Materialized into a set before that truthiness check, not checked
+        # on the raw argument: update_fields is documented as any iterable,
+        # and a generator is a truthy *object* even when it would yield
+        # nothing once consumed - `if update_fields:` on the raw generator
+        # can't tell "empty" from "has items" without consuming it first, so
+        # an explicitly empty generator would still reach the branch below
+        # and turn Django's own empty-iterable no-op into a real write of
+        # just {"updated"}, exactly the bug the truthy check above exists to
+        # avoid for a plain empty list.
+        #
+        # kwargs["update_fields"] is reassigned to the materialized set
+        # unconditionally, not just inside the truthy branch: leaving the
+        # original (now-exhausted, for a generator) value in kwargs when the
+        # materialized set turns out empty would hand Django's own save() a
+        # still-truthy exhausted generator - its `if not update_fields:
+        # return` no-op wouldn't catch it either, and it would go on to
+        # re-consume the same exhausted generator itself, this time actually
+        # getting nothing and hitting its own internal assertion instead of
+        # cleanly no-op'ing (confirmed: this exact ordering raised
+        # `AssertionError` in Model.save_base() before being fixed).
         update_fields = kwargs.get("update_fields")
-        if update_fields:
-            kwargs["update_fields"] = {*update_fields, "updated"}
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            kwargs["update_fields"] = update_fields
+            if update_fields:
+                kwargs["update_fields"] = {*update_fields, "updated"}
         super().save(*args, **kwargs)
 
     def _render(self):
