@@ -28,7 +28,14 @@ def deduplicate_category_slugs(apps, schema_editor):
     # Without `using`, this reads and writes the "default" database alias
     # regardless of which connection `migrate` is actually targeting - same
     # gap 0007 had for Post, fixed there the same way.
-    deduplicate_slugs(Category, using=schema_editor.connection.alias)
+    #
+    # fold=True only on MySQL: Category.slug is public too (every category
+    # page URL is built from it), so case/accent-folding on a case-sensitive
+    # backend (SQLite, PostgreSQL's defaults) would silently rename a live,
+    # distinct, already-working slug like "Foo" for no reason - the real
+    # unique index on those backends would have accepted it unchanged. Same
+    # fix as 0007's for Post.slug.
+    deduplicate_slugs(Category, using=schema_editor.connection.alias, fold=schema_editor.connection.vendor == 'mysql')
 
 
 class Migration(migrations.Migration):

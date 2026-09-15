@@ -89,11 +89,9 @@ class DeduplicatePostSlugsMigrationTests(TransactionTestCase):
         self.assertEqual(len(slugs), len(set(slugs)))
 
     def test_case_variants_are_left_alone_on_a_case_sensitive_backend(self) -> None:
-        # This is the actual, real-connection version of what test_slugs.py's
-        # test_fold_false_leaves_case_and_accent_variants_untouched proves at
-        # the unit level: the migration's own vendor check, not a passed-in
-        # flag, is what decides fold here - this test's real connection is
-        # SQLite, so it should resolve to False and leave both alone.
+        # The migration's own vendor check, not a passed-in flag, is what
+        # decides fold here - this test's real connection is SQLite, so it
+        # should resolve to False and leave both alone.
         Post = self.new_apps.get_model("kioblog", "Post")
         self.assertEqual(Post.objects.get(pk=self.case_first.pk).slug, "Foo")
         self.assertEqual(Post.objects.get(pk=self.case_second.pk).slug, "foo")
@@ -292,15 +290,20 @@ class DeduplicateCategorySlugsMigrationTests(TransactionTestCase):
         Category = self.new_apps.get_model("kioblog", "Category")
         self.assertEqual(Category.objects.get(pk=self.unrelated.pk).slug, "fine")
 
-    def test_treats_case_variants_as_colliding(self) -> None:
+    def test_case_variants_are_left_alone_on_a_case_sensitive_backend(self) -> None:
+        # The migration's own vendor check, not a passed-in flag, is what
+        # decides fold here - this test's real connection is SQLite, so it
+        # should resolve to False and leave both alone. Mirrors 0007's own
+        # test_case_variants_are_left_alone_on_a_case_sensitive_backend for
+        # Post.
         Category = self.new_apps.get_model("kioblog", "Category")
         self.assertEqual(Category.objects.get(pk=self.case_first.pk).slug, "Foo")
-        self.assertEqual(Category.objects.get(pk=self.case_second.pk).slug, "foo-2")
+        self.assertEqual(Category.objects.get(pk=self.case_second.pk).slug, "foo")
 
-    def test_treats_accent_variants_as_colliding(self) -> None:
+    def test_accent_variants_are_left_alone_on_a_case_sensitive_backend(self) -> None:
         Category = self.new_apps.get_model("kioblog", "Category")
         self.assertEqual(Category.objects.get(pk=self.accent_first.pk).slug, "café")
-        self.assertEqual(Category.objects.get(pk=self.accent_second.pk).slug, "cafe-2")
+        self.assertEqual(Category.objects.get(pk=self.accent_second.pk).slug, "cafe")
 
     def test_every_row_survives_with_a_distinct_slug(self) -> None:
         Category = self.new_apps.get_model("kioblog", "Category")
@@ -334,3 +337,48 @@ class DeduplicateSlugsUsingParameterTests(SimpleTestCase):
 
         fake_model.objects.using.assert_called_once_with("replica")
         second.save.assert_called_once_with(using="replica", update_fields=["slug"])
+
+    def test_fold_true_treats_case_and_accent_variants_as_colliding(self) -> None:
+        # Both real migration tests above run against this repo's own SQLite
+        # connection, which always resolves the migrations' own
+        # fold=(vendor == "mysql") to False - neither one ever actually
+        # exercises fold=True causing a rename. This is that coverage,
+        # ported from the old test_slugs.py (deleted once Category itself
+        # became constrained, so it could no longer create real colliding
+        # rows via the ORM to prove this against).
+        foo = MagicMock(slug="Foo")
+        foo2 = MagicMock(slug="foo")
+        cafe_accented = MagicMock(slug="café")
+        cafe_plain = MagicMock(slug="cafe")
+        fake_model = MagicMock()
+        rows = [foo, foo2, cafe_accented, cafe_plain]
+        fake_model.objects.using.return_value = fake_model.objects
+        fake_model.objects.only.return_value.order_by.return_value = rows
+        fake_model._meta.get_field.return_value.max_length = 200
+
+        deduplicate_slugs(fake_model, fold=True)
+
+        foo2.save.assert_called_once_with(using=None, update_fields=["slug"])
+        self.assertEqual(foo2.slug, "foo-2")
+        cafe_plain.save.assert_called_once_with(using=None, update_fields=["slug"])
+        self.assertEqual(cafe_plain.slug, "cafe-2")
+        foo.save.assert_not_called()
+        cafe_accented.save.assert_not_called()
+
+    def test_fold_false_leaves_case_and_accent_variants_untouched(self) -> None:
+        foo = MagicMock(slug="Foo")
+        foo2 = MagicMock(slug="foo")
+        cafe_accented = MagicMock(slug="café")
+        cafe_plain = MagicMock(slug="cafe")
+        fake_model = MagicMock()
+        rows = [foo, foo2, cafe_accented, cafe_plain]
+        fake_model.objects.using.return_value = fake_model.objects
+        fake_model.objects.only.return_value.order_by.return_value = rows
+        fake_model._meta.get_field.return_value.max_length = 200
+
+        deduplicate_slugs(fake_model, fold=False)
+
+        foo.save.assert_not_called()
+        foo2.save.assert_not_called()
+        cafe_accented.save.assert_not_called()
+        cafe_plain.save.assert_not_called()
