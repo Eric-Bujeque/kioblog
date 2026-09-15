@@ -218,8 +218,20 @@ class RenderCacheTests(base.BaseTestCase):
         # render_markdown() already treats None as "" (md.convert(text or
         # "")) - the cache key needs to hash to the same thing, not raise
         # AttributeError on .encode() before ever reaching render_markdown.
-        unsaved = models.Post(pk=999999, title="draft", content=None, user=self.user, category=self.category)
-        self.assertEqual(unsaved.content_html, "")
+        #
+        # A loaded, saved instance with content cleared in memory (never
+        # saved - Post.content is NOT NULL at the database level, so a real
+        # save() with content=None would raise IntegrityError rather than
+        # exercise this path), not an unsaved one: after the _state.adding
+        # fix elsewhere in this file, ANY unsaved instance's cache key now
+        # short-circuits to None before ever reaching the (self.content or
+        # "") line below - Copilot caught that this test silently stopped
+        # exercising what its own name promises once that fix landed, since
+        # it used to reach the digest line, not skip it, for an unsaved
+        # instance with a manually assigned pk.
+        dirty = models.Post.objects.get(pk=self.post.pk)
+        dirty.content = None
+        self.assertEqual(dirty.content_html, "")
 
     def test_second_read_on_the_same_instance_sees_a_later_in_memory_edit(self) -> None:
         # hasattr(self, "_rendered") alone only guards the *first* call - a
