@@ -283,3 +283,27 @@ class KioblogModels(base.BaseTestCase):
 
         self.post.refresh_from_db()
         self.assertGreater(self.post.updated, backdated)
+
+    def test_editing_a_categorys_title_bumps_updated_on_its_posts(self) -> None:
+        # Copilot finding, real: post.html renders post.category.title
+        # directly - editing it changes every one of that category's posts'
+        # public pages without Post.save() ever running, mirroring the Tag
+        # edit receiver above.
+        backdated = self._backdate_post()
+
+        self.category.title = "renamed category"
+        self.category.save()
+
+        self.post.refresh_from_db()
+        self.assertGreater(self.post.updated, backdated)
+
+    def test_creating_a_category_does_not_touch_any_post(self) -> None:
+        # A brand-new category can't be attached to any post yet at the
+        # moment its own post_save fires, so creating one must not bump
+        # anything - mirrors test_creating_a_tag_does_not_touch_any_post.
+        backdated = self._backdate_post()
+
+        models.Category.objects.create(title="brand new category", slug="brand-new-category")
+
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.updated, backdated)

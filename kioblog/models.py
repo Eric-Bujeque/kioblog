@@ -224,8 +224,14 @@ def _bump_updated_on_tag_change(sender, instance, action, reverse, using, pk_set
         # .update()) so auto_now still does the actual timestamping, the
         # same single source of truth every other partial save in this file
         # already goes through.
+        #
+        # `using=using`, not left for Post.save()'s own router resolution to
+        # pick: m2m_changed's `using` names the alias the through-row change
+        # actually ran against, matching the reverse branches below - Copilot
+        # finding, real, for a router that could route the through table
+        # differently than a bare Post instance.
         if action in ("post_add", "post_remove", "post_clear"):
-            instance.save(update_fields=["updated"])
+            instance.save(using=using, update_fields=["updated"])
         return
 
     # Reverse direction (some_tag.posts.add/remove/clear(post, ...), via
@@ -290,9 +296,25 @@ def _bump_updated_on_tag_delete(sender, instance, using, **kwargs):
     Post.objects.using(using).filter(tags=instance).update(updated=timezone.now())
 
 
+def _bump_updated_on_category_edit(sender, instance, created, using, **kwargs):
+    # Copilot finding, real: post.html renders post.category.title directly
+    # - editing a Category's title/slug changes every one of its posts'
+    # public pages without ever touching Post itself, the same gap the Tag
+    # receivers above close for tags. No matching delete receiver needed:
+    # Post.category is on_delete=CASCADE, so deleting a Category deletes
+    # its posts along with it - there's no post left with a stale lastmod
+    # to bump.
+    #
+    # `not created`: a brand-new category can't be attached to any post yet
+    # at the moment this fires, so there's nothing to bump.
+    if not created:
+        Post.objects.using(using).filter(category=instance).update(updated=timezone.now())
+
+
 m2m_changed.connect(_bump_updated_on_tag_change, sender=Post.tags.through)
 post_save.connect(_bump_updated_on_tag_edit, sender=Tag)
 pre_delete.connect(_bump_updated_on_tag_delete, sender=Tag)
+post_save.connect(_bump_updated_on_category_edit, sender=Category)
 
 
 class Comment(models.Model):
