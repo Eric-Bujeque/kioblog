@@ -2,7 +2,7 @@ import re
 from html import unescape
 
 from django.conf import settings
-from django.db import models
+from django.db import models, router
 from django.db.models.signals import m2m_changed
 from django.utils import timezone
 from markdownx.models import MarkdownxField
@@ -104,10 +104,41 @@ class Post(models.Model):
         # exhausted generator itself, hitting its own internal assertion
         # instead of cleanly no-op'ing (confirmed this exact ordering raised
         # AssertionError in Model.save_base() before fixing it this way).
+        #
+        # `using` resolved through the router exactly once, here, and reused
+        # for both the deferred-field decision below and the super().save()
+        # call at the end - not left as None for Django to resolve a second
+        # time on its own, which could hand back a different alias for a
+        # router whose answer isn't stable across calls.
+        using = using or router.db_for_write(self.__class__, instance=self)
         if update_fields is not None:
             update_fields = set(update_fields)
             if update_fields:
                 update_fields.add("updated")
+        elif self.pk is not None and not force_insert:
+            # Copilot finding, real: a bare save() with no explicit
+            # update_fields is usually a full save - every field (including
+            # "updated") gets pre_save() called normally. Except for a
+            # *deferred* instance (Post.objects.only("content").get(...)):
+            # Django's own save() then auto-restricts the write to whichever
+            # fields were actually loaded - "updated" was never one of them,
+            # so it was silently excluded, leaving lastmod stale for exactly
+            # this kind of implicit partial save. Mirrors Model.save()'s own
+            # deferred-field detection (confirmed against Django 3.2's
+            # source, including its `using == self._state.db` guard - this
+            # shortcut is only valid when saving to the same alias the
+            # instance was loaded from) to pre-empt it with the same
+            # update_fields Django would have computed anyway, plus
+            # "updated". Already fixed this exact way on PR #15's own
+            # save() override; applied the same fix here.
+            deferred = self.get_deferred_fields()
+            if deferred and using == self._state.db:
+                field_names = {
+                    f.attname for f in self._meta.concrete_fields if not f.primary_key and not hasattr(f, "through")
+                }
+                loaded = field_names - deferred
+                if loaded:
+                    update_fields = {*loaded, "updated"}
         super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
 
     def _render(self):
@@ -170,7 +201,7 @@ class Post(models.Model):
         return recent_posts[:5]
 
 
-def _bump_updated_on_tag_change(sender, instance, action, reverse, **kwargs):
+def _bump_updated_on_tag_change(sender, instance, action, reverse, pk_set, **kwargs):
     # Copilot finding, real: auto_now only runs when Post.save() actually
     # executes, but ManyToManyField.add()/remove()/clear() write straight to
     # the through table and never call save() at all - a post's tags are
@@ -178,26 +209,56 @@ def _bump_updated_on_tag_change(sender, instance, action, reverse, **kwargs):
     # admin's own tags widget, e.g.) left `updated`, and so the sitemap's
     # lastmod, standing still even though the page's content changed.
     #
-    # `reverse` must be checked: this same signal also fires for the M2M's
-    # reverse direction (some_tag.posts.add(post), Tag.posts being this
-    # field's related_name) - there, `instance` is the Tag, not a Post, and
-    # Tag has no `updated` field at all. Only act on the forward direction,
-    # where `instance` is actually the Post whose tags changed.
+    # post_add/post_remove/post_clear, not the pre_* variants (except
+    # pre_clear below, for a narrower reason): those fire after the
+    # through-table write has actually happened, matching when save()'s own
+    # post_save would normally fire for a content edit - bumping updated on
+    # the pre_* signals would move it even if the underlying
+    # add()/remove()/clear() call went on to fail.
+    if not reverse:
+        # Forward direction (post.tags.add/remove/clear(...)): `instance` is
+        # the Post itself. save(update_fields=["updated"]) rather than a
+        # bare save() - a bare save() would re-run pre_save on every field
+        # via a full UPDATE for no reason, only `updated` itself actually
+        # needs touching here. Passing it through this override (not
+        # .update()) so auto_now still does the actual timestamping, the
+        # same single source of truth every other partial save in this file
+        # already goes through.
+        if action in ("post_add", "post_remove", "post_clear"):
+            instance.save(update_fields=["updated"])
+        return
+
+    # Reverse direction (some_tag.posts.add/remove/clear(post, ...), via
+    # this field's related_name="posts"): `instance` is the Tag, not a
+    # Post, and Tag has no `updated` field at all - naively reusing the
+    # forward branch's instance.save() would raise. Copilot finding, real:
+    # the affected Posts (named by `pk_set` for add/remove) still need
+    # their `updated` bumped, the same as the forward direction - a post's
+    # rendered tags changed here too, just reached from the Tag side.
     #
-    # post_add/post_remove/post_clear, not the pre_* variants: those fire
-    # after the through-table write has actually happened, matching when
-    # save()'s own post_save would normally fire for a content edit -
-    # bumping updated on the pre_* signals would move it even if the
-    # underlying add()/remove()/clear() call went on to fail.
-    #
-    # save(update_fields=["updated"]) rather than a bare save(): a bare
-    # save() would re-run pre_save on every field via a full UPDATE for no
-    # reason - only `updated` itself actually needs touching here. Passing
-    # it through this override (not .update()) so auto_now still does the
-    # actual timestamping, the same single source of truth every other
-    # partial save in this file already goes through.
-    if not reverse and action in ("post_add", "post_remove", "post_clear"):
-        instance.save(update_fields=["updated"])
+    # pk_set is documented as None for post_clear specifically (the
+    # through rows are already gone by the time that signal fires), so the
+    # affected pks are captured at pre_clear instead, while still
+    # queryable, and stashed on the Tag instance for post_clear to read -
+    # the two fire back-to-back in the same call, so the instance is still
+    # the same live object both times.
+    if action == "pre_clear":
+        instance._kioblog_pending_clear_post_pks = set(instance.posts.values_list("pk", flat=True))
+        return
+
+    if action in ("post_add", "post_remove"):
+        post_pks = pk_set
+    elif action == "post_clear":
+        post_pks = getattr(instance, "_kioblog_pending_clear_post_pks", None)
+    else:
+        return
+
+    if post_pks:
+        # .update(), not a per-instance save() loop: a heavily-tagged Tag's
+        # clear() can affect many posts at once. .update() bypasses
+        # auto_now entirely (it isn't Model.save()), so the new value is
+        # set explicitly here rather than relying on the field to fire it.
+        Post.objects.filter(pk__in=post_pks).update(updated=timezone.now())
 
 
 m2m_changed.connect(_bump_updated_on_tag_change, sender=Post.tags.through)

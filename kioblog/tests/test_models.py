@@ -137,6 +137,25 @@ class KioblogModels(base.BaseTestCase):
         self.assertGreater(fresh.updated, backdated)
         self.assertEqual(fresh.content, "# Positional save")
 
+    def test_a_deferred_instances_implicit_save_still_bumps_updated(self) -> None:
+        # Copilot finding, real: Post.objects.only("content").get(...);
+        # post.content = ...; post.save() - no explicit update_fields at
+        # all. Django's own save() then auto-restricts the write to the
+        # fields that were actually *loaded* (a deferred-instance
+        # optimization, confirmed against Django 3.2's own source) -
+        # "updated" was never among them, so without handling this case
+        # specifically it's silently excluded, leaving lastmod stale for
+        # exactly this kind of implicit partial save.
+        backdated = timezone.now() - timezone.timedelta(days=1)
+        models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
+
+        deferred = models.Post.objects.only("content").get(pk=self.post.pk)
+        deferred.content = "# Deferred instance save"
+        deferred.save()
+
+        fresh = models.Post.objects.get(pk=self.post.pk)
+        self.assertGreater(fresh.updated, backdated)
+
     def _backdate_post(self):
         backdated = timezone.now() - timezone.timedelta(days=1)
         models.Post.objects.filter(pk=self.post.pk).update(updated=backdated)
@@ -177,13 +196,47 @@ class KioblogModels(base.BaseTestCase):
         self.post.refresh_from_db()
         self.assertGreater(self.post.updated, backdated)
 
-    def test_reverse_tag_change_does_not_crash(self) -> None:
+    def test_adding_a_post_from_the_reverse_tag_manager_bumps_updated(self) -> None:
         # The same m2m_changed signal also fires for the reverse direction
         # (some_tag.posts.add(post), via the M2M's related_name="posts") -
         # there, `instance` is the Tag, not a Post, and Tag has no `updated`
-        # field at all. Must be a no-op rather than raising FieldError.
-        tag = models.Tag.objects.create(title="reverse", slug="reverse")
+        # field at all, so naively reusing the forward branch would raise
+        # FieldError. Copilot finding, real: the affected Post's tags
+        # changed here too, just reached from the Tag side - it still needs
+        # `updated` bumped, not just avoid crashing.
+        backdated = self._backdate_post()
+        tag = models.Tag.objects.create(title="reverse add", slug="reverse-add")
 
         tag.posts.add(self.post)
 
-        self.assertIn(self.post, tag.posts.all())
+        self.post.refresh_from_db()
+        self.assertGreater(self.post.updated, backdated)
+
+    def test_removing_a_post_from_the_reverse_tag_manager_bumps_updated(self) -> None:
+        tag = models.Tag.objects.create(title="reverse remove", slug="reverse-remove")
+        tag.posts.add(self.post)
+        backdated = self._backdate_post()
+
+        tag.posts.remove(self.post)
+
+        self.post.refresh_from_db()
+        self.assertGreater(self.post.updated, backdated)
+
+    def test_clearing_a_tags_posts_bumps_updated_on_all_of_them(self) -> None:
+        # post_clear's pk_set is None (Django's own m2m_changed contract) -
+        # the affected posts have to be captured at pre_clear, before the
+        # through rows are gone, or this silently affects nobody.
+        tag = models.Tag.objects.create(title="reverse clear", slug="reverse-clear")
+        other = models.Post.objects.create(
+            title="other", content="x", user=self.user, category=self.category, slug="other-tagged"
+        )
+        tag.posts.add(self.post, other)
+        backdated = self._backdate_post()
+        models.Post.objects.filter(pk=other.pk).update(updated=backdated)
+
+        tag.posts.clear()
+
+        self.post.refresh_from_db()
+        other.refresh_from_db()
+        self.assertGreater(self.post.updated, backdated)
+        self.assertGreater(other.updated, backdated)
