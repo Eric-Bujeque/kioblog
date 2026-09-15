@@ -34,7 +34,10 @@ def deduplicate_category_slugs(apps, schema_editor):
     # backend (SQLite, PostgreSQL's defaults) would silently rename a live,
     # distinct, already-working slug like "Foo" for no reason - the real
     # unique index on those backends would have accepted it unchanged. Same
-    # fix as 0007's for Post.slug.
+    # fix as 0007's for Post.slug - including the same caveat: this is a
+    # vendor-level guess, not the column's actual collation; see
+    # deduplicate_slugs's own `fold` docstring for what that does and
+    # doesn't cover (a deliberately case-sensitive MySQL collation, e.g.).
     deduplicate_slugs(Category, using=schema_editor.connection.alias, fold=schema_editor.connection.vendor == 'mysql')
 
 
