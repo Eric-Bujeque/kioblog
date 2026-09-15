@@ -420,3 +420,29 @@ class DeduplicateSlugsUsingParameterTests(SimpleTestCase):
         foo2.save.assert_not_called()
         cafe_accented.save.assert_not_called()
         cafe_plain.save.assert_not_called()
+
+    def test_default_is_fold_false_the_safe_non_destructive_choice(self) -> None:
+        # Copilot finding, real: the two tests above always pass fold=
+        # explicitly, so neither actually proves what the *default* itself
+        # does - a future change to that default (back to the original,
+        # backwards fold=True) could silently reintroduce destructive
+        # folding on every uncovered call site without failing either one.
+        # This is that coverage, ported from the old test_slugs.py (deleted
+        # once Category itself became constrained) rather than dropped along
+        # with it.
+        foo = MagicMock(slug="Foo")
+        foo2 = MagicMock(slug="foo")
+        cafe_accented = MagicMock(slug="café")
+        cafe_plain = MagicMock(slug="cafe")
+        fake_model = MagicMock()
+        rows = [foo, foo2, cafe_accented, cafe_plain]
+        fake_model.objects.using.return_value = fake_model.objects
+        fake_model.objects.only.return_value.order_by.return_value = rows
+        fake_model._meta.get_field.return_value.max_length = 200
+
+        deduplicate_slugs(fake_model)
+
+        foo.save.assert_not_called()
+        foo2.save.assert_not_called()
+        cafe_accented.save.assert_not_called()
+        cafe_plain.save.assert_not_called()
