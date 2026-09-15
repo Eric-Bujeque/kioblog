@@ -55,6 +55,11 @@ class Category(models.Model):
 
     class Meta:
         verbose_name_plural = "Categories"
+        # title alone isn't unique (see the slug comment above - title never
+        # was even meant to be), so two categories sharing a title would have
+        # no guaranteed relative order between them without a tiebreaker -
+        # the same reason Post.Meta.ordering ends in `-id`.
+        ordering = ["title", "id"]
 
 
 class Tag(models.Model):
@@ -63,6 +68,9 @@ class Tag(models.Model):
 
     def __str__(self):
         return self.title
+
+    class Meta:
+        ordering = ["title", "id"]
 
 
 class Post(models.Model):
