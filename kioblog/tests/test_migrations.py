@@ -17,7 +17,9 @@ there is no longer any model the ORM will let collide outside a reversed
 migration state like this one.
 """
 
+import contextlib
 import importlib
+import io
 from unittest.mock import MagicMock
 
 from django.db import connection
@@ -492,3 +494,137 @@ class CategoryTagDefaultOrderingMigrationTests(TransactionTestCase):
     def test_tag_ordering_is_title_then_id_after_the_migration(self) -> None:
         Tag = self.new_apps.get_model("kioblog", "Tag")
         self.assertEqual(Tag._meta.ordering, ["title", "id"])
+
+
+class DeleteCommentMigrationTests(TransactionTestCase):
+    # TransactionTestCase, not TestCase, for the same reason as the classes
+    # above: reversing a migration needs SQLite's foreign_keys pragma
+    # toggled, which it refuses mid-transaction.
+    migrate_from = ("kioblog", "0010_category_tag_default_ordering")
+    migrate_to = ("kioblog", "0011_delete_comment")
+
+    def tearDown(self) -> None:
+        # Leave the database on the newest migration regardless of which
+        # test ran or how it finished. The current kioblog.models no longer
+        # has a Comment class at all (this PR removes it), so a leftover row
+        # from the "refuses" test has to be reached through the model as it
+        # exists at whatever migration state got left behind, not imported
+        # directly - 0011 cannot apply while one exists.
+        executor = MigrationExecutor(connection)
+        current_apps = executor.loader.project_state(list(executor.loader.applied_migrations)).apps
+        try:
+            Comment = current_apps.get_model("kioblog", "Comment")
+        except LookupError:
+            pass  # already past 0011 - nothing to clean up
+        else:
+            Comment.objects.all().delete()
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_refuses_to_migrate_if_a_comment_row_exists(self) -> None:
+        # Comment was registered in the admin, so a staff user could have
+        # created rows through Django's generic CRUD with no public form
+        # involved at all - nothing in kioblog's own code proves an existing
+        # installation's table is actually empty.
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        User = old_apps.get_model("auth", "User")
+        Category = old_apps.get_model("kioblog", "Category")
+        Post = old_apps.get_model("kioblog", "Post")
+        Comment = old_apps.get_model("kioblog", "Comment")
+
+        user = User.objects.create(username="migrationtestuser")
+        category = Category.objects.create(title="cat", slug="cat")
+        post = Post.objects.create(title="T", content="x", user=user, category=category, slug="s")
+        comment = Comment.objects.create(username="commenter", content="hi", post=post, email="a@b.com")
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        with self.assertRaises(RuntimeError) as cm:
+            executor.migrate([self.migrate_to])
+
+        # The error is the only recovery guidance an operator sees, and by
+        # the time they read it the installed kioblog no longer has a
+        # Comment model for ORM-based advice (dumpdata, a shell import) to
+        # work against - it has to name the real table so a database-level
+        # tool can still find it.
+        self.assertIn("kioblog_comment", str(cm.exception))
+
+        # Copilot finding, real: everything above only proved 0011 wasn't
+        # *recorded* as applied - not that the row this whole guard exists
+        # to protect actually survived. A regression that deleted it before
+        # raising would still pass every assertion above; tearDown() would
+        # then quietly hide the data loss by cleaning up whatever's left.
+        # Queried through the same historical Comment (not the live model,
+        # which this installed version no longer has), against the same
+        # alias the migration itself checked.
+        self.assertTrue(Comment.objects.using(connection.alias).filter(pk=comment.pk).exists())
+
+        # The migration's own transaction rolled back, so 0011 was never
+        # recorded as applied.
+        executor = MigrationExecutor(connection)
+        self.assertNotIn(self.migrate_to, executor.loader.applied_migrations)
+
+    def test_migrates_cleanly_when_no_comments_exist(self) -> None:
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate([self.migrate_to])  # must not raise
+
+        new_apps = executor.loader.project_state([self.migrate_to]).apps
+        with self.assertRaises(LookupError):
+            new_apps.get_model("kioblog", "Comment")
+
+        # The check above only proves the migration *state* no longer has a
+        # Comment model - it says nothing about whether DeleteModel actually
+        # dropped the table. An accidentally no-op or state-only deletion
+        # would pass it just as well while leaving kioblog_comment sitting in
+        # deployed databases, so this asks the database directly too.
+        self.assertNotIn("kioblog_comment", connection.introspection.table_names())
+
+    def test_successful_migration_prints_the_race_window_caution(self) -> None:
+        # Copilot finding: the module docstring documents the TOCTOU race
+        # (count() isn't locked against a concurrent writer), but that was
+        # only ever visible to someone reading this file - not to whoever
+        # actually runs `migrate` and watches the preflight check pass. This
+        # proves the caution is printed on exactly that path, not just
+        # written down somewhere a successful run never surfaces.
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            executor.migrate([self.migrate_to])
+
+        self.assertIn("not locked against a concurrent writer", buffer.getvalue())
+        self.assertIn("maintenance window", buffer.getvalue())
+
+
+class RefuseIfCommentsExistUsingParameterTests(SimpleTestCase):
+    # Copilot finding, real: every test above only ever runs against this
+    # repo's own "default" connection - nothing proves
+    # refuse_if_comments_exist actually checks the alias schema_editor
+    # names, rather than silently defaulting to "default", on a real
+    # multi-database installation. Mirrors
+    # DeduplicateSlugsUsingParameterTests' own using-wiring test elsewhere
+    # in this file: no second real database needed to prove the wiring
+    # itself reaches the query, just mocks standing in for `apps` and
+    # `schema_editor`.
+    def test_using_reaches_the_count_query(self) -> None:
+        module = importlib.import_module("kioblog.migrations.0011_delete_comment")
+        fake_manager = MagicMock()
+        fake_manager.using.return_value.count.return_value = 0
+        fake_apps = MagicMock()
+        fake_apps.get_model.return_value.objects = fake_manager
+        fake_schema_editor = MagicMock()
+        fake_schema_editor.connection.alias = "replica"
+
+        module.refuse_if_comments_exist(fake_apps, fake_schema_editor)
+
+        fake_manager.using.assert_called_once_with("replica")
